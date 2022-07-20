@@ -87,12 +87,20 @@ void promise_base::set_to_current_exception() noexcept {
 }
 
 template <promise_base::urgent Urgent>
-void promise_base::make_ready() noexcept {
-    if (_task) {
+void promise_base::make_ready() noexcept
+{
+    if (_task)
+    {
         _state = nullptr;
-        if (Urgent == urgent::yes && !need_preempt()) {
+        if (Urgent == urgent::yes && !need_preempt())
+        {
             ::seastar::schedule_urgent(std::exchange(_task, nullptr));
-        } else {
+        }
+        else
+        {
+            /* 将 _task 作为 schedule 的参数传入，然后将 _task 置空，将 task 放入任务队列后，执行 task, 然后会执行新的 promise 的 set_value,
+             * 然后继续执行后面的任务 */
+            // schedule 接口定义在 reactor.cc 中的 void schedule(task* t) noexcept
             ::seastar::schedule(std::exchange(_task, nullptr));
         }
     }

@@ -151,20 +151,26 @@ class buffer_allocator;
 template <typename Func> // signature: bool ()
 std::unique_ptr<pollfn> make_pollfn(Func&& func);
 
-class poller {
+class poller
+{
     std::unique_ptr<pollfn> _pollfn;
     class registration_task;
     class deregistration_task;
     registration_task* _registration_task = nullptr;
+
 public:
     template <typename Func> // signature: bool ()
-    static poller simple(Func&& poll) {
+    static poller simple(Func&& poll)
+    {
         return poller(make_pollfn(std::forward<Func>(poll)));
     }
+
     poller(std::unique_ptr<pollfn> fn)
-            : _pollfn(std::move(fn)) {
+        : _pollfn(std::move(fn))
+    {
         do_register();
     }
+
     ~poller();
     poller(poller&& x);
     poller& operator=(poller&& x);
@@ -178,8 +184,10 @@ class kernel_completion;
 class io_queue;
 class disk_config_params;
 
-class reactor {
+class reactor
+{
     using sched_clock = std::chrono::steady_clock;
+
 private:
     struct task_queue;
     using task_queue_list = circular_buffer_fixed_capacity<task_queue*, max_scheduling_groups()>;
@@ -218,13 +226,15 @@ private:
     friend class reactor_backend_aio;
     friend class reactor_backend_selector;
     friend class aio_storage_context;
+
 public:
     using poller = internal::poller;
     using idle_cpu_handler_result = seastar::idle_cpu_handler_result;
     using work_waiting_on_reactor = seastar::work_waiting_on_reactor;
     using idle_cpu_handler = seastar::idle_cpu_handler;
 
-    struct io_stats {
+    struct io_stats
+    {
         uint64_t aio_reads = 0;
         uint64_t aio_read_bytes = 0;
         uint64_t aio_writes = 0;
@@ -275,6 +285,9 @@ private:
     bool _handle_sigint = true;
     compat::optional<future<std::unique_ptr<network_stack>>> _network_stack_ready;
     int _return = 0;
+
+    /* 每个 reactor 都有一个 promise, 每个 promise 通过调用 get_future 方法来获取 future 对象.
+     * 当 promise 的 set_value 方法被调用时, future 对象变为 就绪态 */
     promise<> _start_promise;
     semaphore _cpu_started;
     internal::preemption_monitor _preemption_monitor{};
@@ -293,7 +306,9 @@ private:
     uint64_t _fsyncs = 0;
     uint64_t _cxx_exceptions = 0;
     uint64_t _abandoned_failed_futures = 0;
-    struct task_queue {
+
+    struct task_queue
+    {
         explicit task_queue(unsigned id, sstring name, float shares);
         int64_t _vruntime = 0;
         float _shares;
@@ -303,7 +318,7 @@ private:
         uint8_t _id;
         sched_clock::duration _runtime = {};
         uint64_t _tasks_processed = 0;
-        circular_buffer<task*> _q;
+        circular_buffer<task*> _q;          // 保存 task 的环形缓冲区
         sstring _name;
         int64_t to_vruntime(sched_clock::duration runtime) const;
         void set_shares(float shares);
@@ -311,6 +326,7 @@ private:
         sched_clock::duration _time_spent_on_task_quota_violations = {};
         seastar::metrics::metric_groups _metrics;
         void rename(sstring new_name);
+
     private:
         void register_stats();
     };
@@ -325,7 +341,7 @@ private:
     sched_clock::duration _task_quota;
     /// Handler that will be called when there is no task to execute on cpu.
     /// It represents a low priority work.
-    /// 
+    ///
     /// Handler's return value determines whether handler did any actual work. If no work was done then reactor will go
     /// into sleep.
     ///
@@ -353,6 +369,7 @@ private:
     bool _bypass_fsync = false;
     bool _have_aio_fsync = false;
     std::atomic<bool> _dying{false};
+
 private:
     static std::chrono::nanoseconds calculate_poll_time();
     static void block_notifier(int);
@@ -383,7 +400,8 @@ public:
     void handle_signal(int signo, noncopyable_function<void ()>&& handler);
 
 private:
-    class signals {
+    class signals
+    {
     public:
         signals();
         ~signals();
@@ -394,11 +412,14 @@ private:
         void handle_signal_once(int signo, noncopyable_function<void ()>&& handler);
         static void action(int signo, siginfo_t* siginfo, void* ignore);
         static void failed_to_handle(int signo);
+
     private:
-        struct signal_handler {
+        struct signal_handler
+        {
             signal_handler(int signo, noncopyable_function<void ()>&& handler);
             noncopyable_function<void ()> _handler;
         };
+
         std::atomic<uint64_t> _pending_signals;
         std::unordered_map<int, signal_handler> _signal_handlers;
 
@@ -447,6 +468,7 @@ private:
     do_write_some(pollable_fd_state& fd, const void* buffer, size_t size);
     future<size_t>
     do_write_some(pollable_fd_state& fd, net::packet& p);
+
 public:
     static boost::program_options::options_description get_options_description(reactor_config cfg);
     explicit reactor(unsigned id, reactor_backend_selector rbs, reactor_config cfg);
@@ -454,15 +476,20 @@ public:
     ~reactor();
     void operator=(const reactor&) = delete;
 
-    sched_clock::duration uptime() {
+    sched_clock::duration uptime()
+    {
         return sched_clock::now() - _start_time;
     }
 
-    io_queue& get_io_queue(dev_t devid = 0) {
+    io_queue& get_io_queue(dev_t devid = 0)
+    {
         auto queue = _io_queues.find(devid);
-        if (queue == _io_queues.end()) {
+        if (queue == _io_queues.end())
+        {
             return *_io_queues[0];
-        } else {
+        }
+        else
+        {
             return *(queue->second);
         }
     }
@@ -505,9 +532,12 @@ public:
     future<stat_data> file_stat(sstring pathname, follow_symlink) noexcept;
     future<uint64_t> file_size(sstring pathname) noexcept;
     future<bool> file_accessible(sstring pathname, access_flags flags) noexcept;
-    future<bool> file_exists(sstring pathname) noexcept {
+
+    future<bool> file_exists(sstring pathname) noexcept
+    {
         return file_accessible(pathname, access_flags::exists);
     }
+
     future<fs_type> file_system_at(sstring pathname) noexcept;
     future<struct statvfs> statvfs(sstring pathname) noexcept;
     future<> remove_file(sstring pathname) noexcept;
@@ -516,7 +546,7 @@ public:
     future<> chmod(sstring name, file_permissions permissions) noexcept;
 
     future<int> inotify_add_watch(int fd, const sstring& path, uint32_t flags);
-    
+
     // In the following three methods, prepare_io is not guaranteed to execute in the same processor
     // in which it was generated. Therefore, care must be taken to avoid the use of objects that could
     // be destroyed within or at exit of prepare_io.
@@ -525,13 +555,16 @@ public:
             const io_priority_class& priority_class,
             size_t len,
             internal::io_request req) noexcept;
+
     future<size_t> submit_io_write(io_queue* ioq,
             const io_priority_class& priority_class,
             size_t len,
             internal::io_request req) noexcept;
 
-    inline void handle_io_result(ssize_t res) {
-        if (res < 0) {
+    inline void handle_io_result(ssize_t res)
+    {
+        if (res < 0)
+        {
             ++_io_stats.aio_errors;
             throw_kernel_error(res);
         }
@@ -539,18 +572,25 @@ public:
 
     int run();
     void exit(int ret);
-    future<> when_started() { return _start_promise.get_future(); }
+
+    future<> when_started()
+    {
+        return _start_promise.get_future();     // 每个 reactor 实例都有一个 promise
+    }
+
     // The function waits for timeout period for reactor stop notification
     // which happens on termination signals or call for exit().
     template <typename Rep, typename Period>
-    future<> wait_for_stop(std::chrono::duration<Rep, Period> timeout) {
+    future<> wait_for_stop(std::chrono::duration<Rep, Period> timeout)
+    {
         return _stop_requested.wait(timeout, [this] { return _stopping; });
     }
 
     void at_exit(noncopyable_function<future<> ()> func);
 
     template <typename Func>
-    void at_destroy(Func&& func) {
+    void at_destroy(Func&& func)
+    {
         _at_destroy_tasks->_q.push_back(make_task(default_scheduling_group(), std::forward<Func>(func)));
     }
 
@@ -558,19 +598,25 @@ public:
     void shuffle(task*&, task_queue&);
 #endif
 
-    void add_task(task* t) noexcept {
+    void add_task(task* t) noexcept
+    {
         auto sg = t->group();
         auto* q = _task_queues[sg._id].get();
         bool was_empty = q->_q.empty();
-        q->_q.push_back(std::move(t));
+        q->_q.push_back(std::move(t));      // 将 task 放入到 _task_queues 中
 #ifdef SEASTAR_SHUFFLE_TASK_QUEUE
         shuffle(q->_q.back(), *q);
 #endif
-        if (was_empty) {
+        if (was_empty)
+        {
+            // 增加新任务到 _task_queues 中时，如果 _task_queues 为空，
+            // 则将 task_queue 加入到 _activating_task_queues 中(每个线程在 run_some_tasks 中对该任务队列进行处理)
             activate(*q);
         }
     }
-    void add_urgent_task(task* t) noexcept {
+
+    void add_urgent_task(task* t) noexcept
+    {
         auto sg = t->group();
         auto* q = _task_queues[sg._id].get();
         bool was_empty = q->_q.empty();
@@ -585,7 +631,7 @@ public:
 
     /// Set a handler that will be called when there is no task to execute on cpu.
     /// Handler should do a low priority work.
-    /// 
+    ///
     /// Handler's return value determines whether handler did any actual work. If no work was done then reactor will go
     /// into sleep.
     ///

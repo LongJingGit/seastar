@@ -1452,17 +1452,20 @@ reactor::posix_connect(pollable_fd pfd, socket_address sa, socket_address local)
 }
 
 server_socket
-reactor::listen(socket_address sa, listen_options opt) {
+reactor::listen(socket_address sa, listen_options opt)
+{
     return server_socket(_network_stack->listen(sa, opt));
 }
 
 future<connected_socket>
-reactor::connect(socket_address sa) {
+reactor::connect(socket_address sa)
+{
     return _network_stack->connect(sa);
 }
 
 future<connected_socket>
-reactor::connect(socket_address sa, socket_address local, transport proto) {
+reactor::connect(socket_address sa, socket_address local, transport proto)
+{
     return _network_stack->connect(sa, local, proto);
 }
 
@@ -1507,10 +1510,13 @@ reactor::submit_io(kernel_completion* desc, io_request req) {
 }
 
 bool
-reactor::flush_pending_aio() {
-    for (auto& ioq : my_io_queues) {
+reactor::flush_pending_aio()
+{
+    for (auto& ioq : my_io_queues)
+    {
         ioq->poll_io_queue();
     }
+
     return false;
 }
 
@@ -2139,16 +2145,18 @@ void reactor::register_metrics() {
     });
 }
 
-void reactor::run_tasks(task_queue& tq) {
+void reactor::run_tasks(task_queue& tq)
+{
     // Make sure new tasks will inherit our scheduling group
     *internal::current_scheduling_group_ptr() = scheduling_group(tq._id);
     auto& tasks = tq._q;
-    while (!tasks.empty()) {
+    while (!tasks.empty())
+    {
         auto tsk = tasks.front();
         tasks.pop_front();
         STAP_PROBE(seastar, reactor_run_tasks_single_start);
         task_histogram_add_task(*tsk);
-        tsk->run_and_dispose();
+        tsk->run_and_dispose();     // 执行 task. 实际上是在执行 continuation::run_and_dispose. continuation 是 task 的派生类
         STAP_PROBE(seastar, reactor_run_tasks_single_end);
         ++tq._tasks_processed;
         ++_global_tasks_processed;
@@ -2324,23 +2332,31 @@ public:
     }
 };
 
-class reactor::io_queue_submission_pollfn final : public reactor::pollfn {
+class reactor::io_queue_submission_pollfn final : public reactor::pollfn
+{
     reactor& _r;
+
 public:
     io_queue_submission_pollfn(reactor& r) : _r(r) {}
-    virtual bool poll() final override {
+
+    virtual bool poll() final override
+    {
         return _r.flush_pending_aio();
     }
-    virtual bool pure_poll() override final {
+
+    virtual bool pure_poll() override final
+    {
         return poll(); // actually performs work, but triggers no user continuations, so okay
     }
-    virtual bool try_enter_interrupt_mode() override {
+
+    virtual bool try_enter_interrupt_mode() override
+    {
         // This is a passive poller, so if a previous poll
         // returned false (idle), there's no more work to do.
         return true;
     }
-    virtual void exit_interrupt_mode() override final {
-    }
+
+    virtual void exit_interrupt_mode() override final {}
 };
 
 class reactor::drain_cross_cpu_freelist_pollfn final : public reactor::pollfn {
@@ -2536,34 +2552,40 @@ void reactor::insert_active_task_queue(task_queue* tq) {
 }
 
 void
-reactor::insert_activating_task_queues() {
+reactor::insert_activating_task_queues()
+{
     // Quadratic, but since we expect the common cases in insert_active_task_queue() to dominate, faster
-    for (auto&& tq : _activating_task_queues) {
+    for (auto&& tq : _activating_task_queues)
+    {
         insert_active_task_queue(tq);
     }
     _activating_task_queues.clear();
 }
 
 void
-reactor::run_some_tasks() {
-    if (!have_more_tasks()) {
+reactor::run_some_tasks()
+{
+    if (!have_more_tasks())
+    {
         return;
     }
+
     sched_print("run_some_tasks: start");
     reset_preemption_monitor();
 
     sched_clock::time_point t_run_completed = std::chrono::steady_clock::now();
     STAP_PROBE(seastar, reactor_run_tasks_start);
     _cpu_stall_detector->start_task_run(t_run_completed);
+
     do {
         auto t_run_started = t_run_completed;
-        insert_activating_task_queues();
+        insert_activating_task_queues();        // 将 task_queue 从 _activating_task_queues 移动到 _active_task_queues 中
         auto tq = _active_task_queues.front();
         _active_task_queues.pop_front();
         sched_print("running tq {} {}", (void*)tq, tq->_name);
         tq->_current = true;
         _last_vruntime = std::max(tq->_vruntime, _last_vruntime);
-        run_tasks(*tq);
+        run_tasks(*tq);             // 执行任务
         tq->_current = false;
         t_run_completed = std::chrono::steady_clock::now();
         auto delta = t_run_completed - t_run_started;
@@ -2576,6 +2598,7 @@ reactor::run_some_tasks() {
             tq->_active = false;
         }
     } while (have_more_tasks() && !need_preempt());
+
     _cpu_stall_detector->end_task_run(t_run_completed);
     STAP_PROBE(seastar, reactor_run_tasks_end);
     *internal::current_scheduling_group_ptr() = default_scheduling_group(); // Prevent inheritance from last group run
@@ -2583,8 +2606,10 @@ reactor::run_some_tasks() {
 }
 
 void
-reactor::activate(task_queue& tq) {
-    if (tq._active) {
+reactor::activate(task_queue& tq)
+{
+    if (tq._active)
+    {
         return;
     }
     sched_print("activating {} {}", (void*)&tq, tq._name);
@@ -2594,22 +2619,27 @@ reactor::activate(task_queue& tq) {
     // bound later.
     //
     // FIXME: different scheduling groups have different sensitivity to jitter, take advantage
-    if (_last_vruntime > tq._vruntime) {
+    if (_last_vruntime > tq._vruntime)
+    {
         sched_print("tq {} {} losing vruntime {} due to sleep", (void*)&tq, tq._name, _last_vruntime - tq._vruntime);
     }
+
     tq._vruntime = std::max(_last_vruntime, tq._vruntime);
-    _activating_task_queues.push_back(&tq);
+    _activating_task_queues.push_back(&tq);     // 将 task_queue 保存到 _activating_task_queues 中
 }
 
-void reactor::service_highres_timer() {
+void reactor::service_highres_timer()
+{
     complete_timers(_timers, _expired_timers, [this] {
-        if (!_timers.empty()) {
+        if (!_timers.empty())
+        {
             enable_timer(_timers.get_next_timeout());
         }
     });
 }
 
-int reactor::run() {
+int reactor::run()
+{
 #ifndef SEASTAR_ASAN_ENABLED
     // SIGSTKSZ is too small when using asan. We also don't need to
     // handle SIGSEGV ourselves when using asan, so just don't install
@@ -2641,7 +2671,7 @@ int reactor::run() {
     poller smp_poller(std::make_unique<smp_pollfn>(*this));
 
     poller reap_kernel_completions_poller(std::make_unique<reap_kernel_completions_pollfn>(*this));
-    poller io_queue_submission_poller(std::make_unique<io_queue_submission_pollfn>(*this));
+    poller io_queue_submission_poller(std::make_unique<io_queue_submission_pollfn>(*this));     // 处理 IO 任务的 poller
     poller kernel_submit_work_poller(std::make_unique<kernel_submit_work_pollfn>(*this));
     poller final_real_kernel_completions_poller(std::make_unique<reap_kernel_completions_pollfn>(*this));
 
@@ -2650,8 +2680,10 @@ int reactor::run() {
 
     start_aio_eventfd_loop();
 
-    if (_id == 0 && _cfg.auto_handle_sigint_sigterm) {
-       if (_handle_sigint) {
+    if (_id == 0 && _cfg.auto_handle_sigint_sigterm)
+    {
+       if (_handle_sigint)
+       {
           _signals.handle_signal_once(SIGINT, [this] { stop(); });
        }
        _signals.handle_signal_once(SIGTERM, [this] { stop(); });
@@ -2659,16 +2691,31 @@ int reactor::run() {
 
     // Start initialization in the background.
     // Communicate when done using _start_promise.
+    // 等待 cpu start
+    /**
+     * .wait() 返回的是已经绑定 promise 的 future, 所以后面会将 lambda 直接封装成 continuation, 然后挂载到 promise 的 task 上,
+     * 但是并不会立即将 task 放进 reactor 的任务队列，而是等待 promise 执行完 set_value 之后才会将该 task 放到任务队列，然后由 reactor 执行.
+     *
+     * NOTE: 什么时候会执行 wait 接口中创建的 promise 的 set_value ?
+     * .wait() 接口中将 promise 封装到了 entry 中，然后放到了 _wait_list 中, 在 signal 中会从 _wait_list 中逐个取出 entry 然后执行 set_value
+     */
     (void)_cpu_started.wait(smp::count).then([this] {
+        /* initialize 返回的是一个就绪态的 future, 所以后面 then 调用中的 lambda 会被封装到 continuation 然后放进 reactor 的任务队列直接执行,
+         * 不用等待 promise 执行 set_value */
         (void)_network_stack->initialize().then([this] {
-            _start_promise.set_value();
+            _start_promise.set_value();    // promise 执行 set_value(), run_deprecated 中的第一个 then 调用中的任务开始执行
         });
     });
+
     // Wait for network stack in the background and then signal all cpus.
+    /**
+     * NOTE: _network_stack_ready 是一个 future 类型，但是该 future 没有绑定 promise 且是就绪状态, 所以 then() 中对应的 lambda 会被封装
+     * 到 continuation 里面，然后加入到 reactor 的任务队列中，由 reactor 在下一次事件循环中执行.
+     */
     (void)_network_stack_ready->then([this] (std::unique_ptr<network_stack> stack) {
         _network_stack = std::move(stack);
         return smp::invoke_on_all([] {
-            engine()._cpu_started.signal();
+            engine()._cpu_started.signal();     // 通知 cpu started.
         });
     });
 
@@ -2683,6 +2730,7 @@ int reactor::run() {
     timer<lowres_clock> load_timer;
     auto last_idle = _total_idle;
     auto idle_start = sched_clock::now(), idle_end = idle_start;
+
     load_timer.set_callback([this, &last_idle, &idle_start, &idle_end] () mutable {
         _total_idle += idle_end - idle_start;
         auto load = double((_total_idle - last_idle).count()) / double(std::chrono::duration_cast<sched_clock::duration>(1s).count());
@@ -2697,6 +2745,7 @@ int reactor::run() {
         }
         _load += (load/5);
     });
+
     load_timer.arm_periodic(1s);
 
     itimerspec its = seastar::posix::to_relative_itimerspec(_task_quota, _task_quota);
@@ -2714,23 +2763,32 @@ int reactor::run() {
     std::function<bool()> check_for_work = [this] () {
         return poll_once() || have_more_tasks();
     };
+
     std::function<bool()> pure_check_for_work = [this] () {
         return pure_poll_once() || have_more_tasks();
     };
-    while (true) {
-        run_some_tasks();
-        if (_stopped) {
+
+    while (true)
+    {
+        run_some_tasks();       // 从 _active_task_queues 队列中取出任务运行，直到队列为空
+        if (_stopped)
+        {
             load_timer.cancel();
             // Final tasks may include sending the last response to cpu 0, so run them
-            while (have_more_tasks()) {
+            while (have_more_tasks())
+            {
                 run_some_tasks();
             }
-            while (!_at_destroy_tasks->_q.empty()) {
+
+            while (!_at_destroy_tasks->_q.empty())
+            {
                 run_tasks(*_at_destroy_tasks);
             }
+
             _finished_running_tasks = true;
             smp::arrive_at_event_loop_end();
-            if (_id == 0) {
+            if (_id == 0)
+            {
                 smp::join_all();
             }
             break;
@@ -2738,32 +2796,44 @@ int reactor::run() {
 
         _polls++;
 
-        if (check_for_work()) {
-            if (idle) {
+        if (check_for_work())   // check_for_work() 中会调用 reactor::poller_once 方法
+        {
+            if (idle)
+            {
                 _total_idle += idle_end - idle_start;
                 account_idle(idle_end - idle_start);
                 idle_start = idle_end;
                 idle = false;
             }
-        } else {
+        }
+        else
+        {
             idle_end = sched_clock::now();
-            if (!idle) {
+            if (!idle)
+            {
                 idle_start = idle_end;
                 idle = true;
             }
+
             bool go_to_sleep = true;
-            try {
+            try
+            {
                 // we can't run check_for_work(), because that can run tasks in the context
                 // of the idle handler which change its state, without the idle handler expecting
                 // it.  So run pure_check_for_work() instead.
                 auto handler_result = _idle_cpu_handler(pure_check_for_work);
                 go_to_sleep = handler_result == idle_cpu_handler_result::no_more_work;
-            } catch (...) {
+            }
+            catch (...)
+            {
                 report_exception("Exception while running idle cpu handler", std::current_exception());
             }
-            if (go_to_sleep) {
+
+            if (go_to_sleep)
+            {
                 internal::cpu_relax();
-                if (idle_end - idle_start > _max_poll_time) {
+                if (idle_end - idle_start > _max_poll_time)
+                {
                     // Turn off the task quota timer to avoid spurious wakeups
                     struct itimerspec zero_itimerspec = {};
                     _task_quota_timer.timerfd_settime(0, zero_itimerspec);
@@ -2776,7 +2846,9 @@ int reactor::run() {
                     _total_sleep += idle_end - start_sleep;
                     _task_quota_timer.timerfd_settime(0, task_quote_itimerspec);
                 }
-            } else {
+            }
+            else
+            {
                 // We previously ran pure_check_for_work(), might not actually have performed
                 // any work.
                 check_for_work();
@@ -2792,11 +2864,15 @@ int reactor::run() {
 }
 
 void
-reactor::sleep() {
-    for (auto i = _pollers.begin(); i != _pollers.end(); ++i) {
+reactor::sleep()
+{
+    for (auto i = _pollers.begin(); i != _pollers.end(); ++i)
+    {
         auto ok = (*i)->try_enter_interrupt_mode();
-        if (!ok) {
-            while (i != _pollers.begin()) {
+        if (!ok)
+        {
+            while (i != _pollers.begin())
+            {
                 (*--i)->exit_interrupt_mode();
             }
             return;
@@ -2805,15 +2881,18 @@ reactor::sleep() {
 
     _backend->wait_and_process_events(&_active_sigmask);
 
-    for (auto i = _pollers.rbegin(); i != _pollers.rend(); ++i) {
+    for (auto i = _pollers.rbegin(); i != _pollers.rend(); ++i)
+    {
         (*i)->exit_interrupt_mode();
     }
 }
 
 bool
-reactor::poll_once() {
+reactor::poll_once()
+{
     bool work = false;
-    for (auto c : _pollers) {
+    for (auto c : _pollers)
+    {
         work |= c->poll();
     }
 
@@ -2821,9 +2900,12 @@ reactor::poll_once() {
 }
 
 bool
-reactor::pure_poll_once() {
-    for (auto c : _pollers) {
-        if (c->pure_poll()) {
+reactor::pure_poll_once()
+{
+    for (auto c : _pollers)
+    {
+        if (c->pure_poll())
+        {
             return true;
         }
     }
@@ -2832,22 +2914,31 @@ reactor::pure_poll_once() {
 
 namespace internal {
 
-class poller::registration_task final : public task {
+class poller::registration_task final : public task
+{
 private:
     poller* _p;
+
 public:
     explicit registration_task(poller* p) : _p(p) {}
-    virtual void run_and_dispose() noexcept override {
-        if (_p) {
+
+    virtual void run_and_dispose() noexcept override
+    {
+        if (_p)
+        {
             engine().register_poller(_p->_pollfn.get());
             _p->_registration_task = nullptr;
         }
         delete this;
     }
-    void cancel() {
+
+    void cancel()
+    {
         _p = nullptr;
     }
-    void moved(poller* p) {
+
+    void moved(poller* p)
+    {
         _p = p;
     }
 };
@@ -2895,8 +2986,8 @@ poller::operator=(poller&& x) {
     return *this;
 }
 
-void
-poller::do_register() noexcept {
+void poller::do_register() noexcept
+{
     // We can't just insert a poller into reactor::_pollers, because we
     // may be running inside a poller ourselves, and so in the middle of
     // iterating reactor::_pollers itself.  So we schedule a task to add
@@ -3189,11 +3280,13 @@ future<size_t> readable_eventfd::wait() {
     });
 }
 
-void schedule(task* t) noexcept {
-    engine().add_task(t);
+void schedule(task* t) noexcept
+{
+    engine().add_task(t);       // 将 task 放入 reactor 的任务队列
 }
 
-void schedule_urgent(task* t) noexcept {
+void schedule_urgent(task* t) noexcept
+{
     engine().add_urgent_task(t);
 }
 
@@ -3400,7 +3493,8 @@ void smp::arrive_at_event_loop_end() {
     }
 }
 
-void smp::allocate_reactor(unsigned id, reactor_backend_selector rbs, reactor_config cfg) {
+void smp::allocate_reactor(unsigned id, reactor_backend_selector rbs, reactor_config cfg)
+{
     assert(!reactor_holder);
 
     // we cannot just write "local_engin = new reactor" since reactor's constructor
@@ -3414,28 +3508,38 @@ void smp::allocate_reactor(unsigned id, reactor_backend_selector rbs, reactor_co
     reactor_holder.reset(local_engine);
 }
 
-void smp::cleanup() {
+void smp::cleanup()
+{
     smp::_threads = std::vector<posix_thread>();
     _thread_loops.clear();
 }
 
-void smp::cleanup_cpu() {
+void smp::cleanup_cpu()
+{
     size_t cpuid = this_shard_id();
 
-    if (_qs) {
-        for(unsigned i = 0; i < smp::count; i++) {
+    if (_qs)
+    {
+        for(unsigned i = 0; i < smp::count; i++)
+        {
             _qs[i][cpuid].stop();
         }
     }
-    if (alien::smp::_qs) {
+
+    if (alien::smp::_qs)
+    {
         alien::smp::_qs[cpuid].stop();
     }
 }
 
-void smp::create_thread(std::function<void ()> thread_loop) {
-    if (_using_dpdk) {
+void smp::create_thread(std::function<void ()> thread_loop)
+{
+    if (_using_dpdk)
+    {
         _thread_loops.push_back(std::move(thread_loop));
-    } else {
+    }
+    else
+    {
         _threads.emplace_back(std::move(thread_loop));
     }
 }
@@ -3443,7 +3547,8 @@ void smp::create_thread(std::function<void ()> thread_loop) {
 // Installs handler for Signal which ensures that Func is invoked only once
 // in the whole program and that after it is invoked the default handler is restored.
 template<int Signal, void(*Func)()>
-void install_oneshot_signal_handler() {
+void install_oneshot_signal_handler()
+{
     static bool handled = false;
     static util::spinlock lock;
 
@@ -3632,7 +3737,8 @@ public:
     }
 };
 
-void smp::register_network_stacks() {
+void smp::register_network_stacks()
+{
     register_posix_stack();
     register_native_stack();
 }
@@ -3640,7 +3746,8 @@ void smp::register_network_stacks() {
 void smp::configure(boost::program_options::variables_map configuration, reactor_config reactor_cfg)
 {
 #ifndef SEASTAR_NO_EXCEPTION_HACK
-    if (configuration["enable-glibc-exception-scaling-workaround"].as<bool>()) {
+    if (configuration["enable-glibc-exception-scaling-workaround"].as<bool>())
+    {
         init_phdr_cache();
     }
 #endif
@@ -3652,14 +3759,17 @@ void smp::configure(boost::program_options::variables_map configuration, reactor
     // We leave some signals unmasked since we don't handle them ourself.
     sigset_t sigs;
     sigfillset(&sigs);
-    for (auto sig : {SIGHUP, SIGQUIT, SIGILL, SIGABRT, SIGFPE, SIGSEGV,
-            SIGALRM, SIGCONT, SIGSTOP, SIGTSTP, SIGTTIN, SIGTTOU}) {
+    for (auto sig : {SIGHUP, SIGQUIT, SIGILL, SIGABRT, SIGFPE, SIGSEGV, SIGALRM, SIGCONT, SIGSTOP, SIGTSTP, SIGTTIN, SIGTTOU})
+    {
         sigdelset(&sigs, sig);
     }
-    if (!reactor_cfg.auto_handle_sigint_sigterm) {
+
+    if (!reactor_cfg.auto_handle_sigint_sigterm)
+    {
         sigdelset(&sigs, SIGINT);
         sigdelset(&sigs, SIGTERM);
     }
+
     pthread_sigmask(SIG_BLOCK, &sigs, nullptr);
 
 #ifndef SEASTAR_ASAN_ENABLED
@@ -3668,21 +3778,27 @@ void smp::configure(boost::program_options::variables_map configuration, reactor
 #else
     (void)sigsegv_action;
 #endif
+
     install_oneshot_signal_handler<SIGABRT, sigabrt_action>();
 
 #ifdef SEASTAR_HAVE_DPDK
     _using_dpdk = configuration.count("dpdk-pmd");
 #endif
+
     auto thread_affinity = configuration["thread-affinity"].as<bool>();
-    if (configuration.count("overprovisioned")
-           && configuration["thread-affinity"].defaulted()) {
+    if (configuration.count("overprovisioned") && configuration["thread-affinity"].defaulted())
+    {
         thread_affinity = false;
     }
-    if (!thread_affinity && _using_dpdk) {
+
+    if (!thread_affinity && _using_dpdk)
+    {
         fmt::print("warning: --thread-affinity 0 ignored in dpdk mode\n");
     }
+
     auto mbind = configuration["mbind"].as<bool>();
-    if (!thread_affinity) {
+    if (!thread_affinity)
+    {
         mbind = false;
     }
 
@@ -3695,9 +3811,11 @@ void smp::configure(boost::program_options::variables_map configuration, reactor
     std::copy(boost::counting_iterator<unsigned>(0), boost::counting_iterator<unsigned>(nr_cpus),
             std::inserter(cpu_set, cpu_set.end()));
 
-    if (configuration.count("cpuset")) {
+    if (configuration.count("cpuset"))
+    {
         cpu_set = configuration["cpuset"].as<cpuset_bpo_wrapper>().value;
-        if (cgroup_cpu_set && *cgroup_cpu_set != cpu_set) {
+        if (cgroup_cpu_set && *cgroup_cpu_set != cpu_set)
+        {
             // CPUs that are not available are those pinned by
             // --cpuset but not by cgroups, if mounted.
             std::set<unsigned int> not_available_cpus;
@@ -3705,28 +3823,38 @@ void smp::configure(boost::program_options::variables_map configuration, reactor
                                 cgroup_cpu_set->begin(), cgroup_cpu_set->end(),
                                 std::inserter(not_available_cpus, not_available_cpus.end()));
 
-            if (!not_available_cpus.empty()) {
+            if (!not_available_cpus.empty())
+            {
                 std::ostringstream not_available_cpus_list;
-                for (auto cpu_id : not_available_cpus) {
+                for (auto cpu_id : not_available_cpus)
+                {
                     not_available_cpus_list << " " << cpu_id;
                 }
+
                 seastar_logger.error("Bad value for --cpuset:{} not allowed. Shutting down.", not_available_cpus_list.str());
                 exit(1);
             }
         }
-    } else if (cgroup_cpu_set) {
+    }
+    else if (cgroup_cpu_set)
+    {
         cpu_set = *cgroup_cpu_set;
     }
 
-    if (configuration.count("smp")) {
+    if (configuration.count("smp"))
+    {
         nr_cpus = configuration["smp"].as<unsigned>();
-    } else {
+    }
+    else
+    {
         nr_cpus = cpu_set.size();
     }
+
     smp::count = nr_cpus;
     _reactors.resize(nr_cpus);
     resource::configuration rc;
-    if (configuration.count("memory")) {
+    if (configuration.count("memory"))
+    {
         rc.total_memory = parse_memory_size(configuration["memory"].as<std::string>());
 #ifdef SEASTAR_HAVE_DPDK
         if (configuration.count("hugepages") &&
@@ -3749,20 +3877,29 @@ void smp::configure(boost::program_options::variables_map configuration, reactor
         }
 #endif
     }
-    if (configuration.count("reserve-memory")) {
+
+    if (configuration.count("reserve-memory"))
+    {
         rc.reserve_memory = parse_memory_size(configuration["reserve-memory"].as<std::string>());
     }
+
     compat::optional<std::string> hugepages_path;
-    if (configuration.count("hugepages")) {
+    if (configuration.count("hugepages"))
+    {
         hugepages_path = configuration["hugepages"].as<std::string>();
     }
+
     auto mlock = false;
-    if (configuration.count("lock-memory")) {
+    if (configuration.count("lock-memory"))
+    {
         mlock = configuration["lock-memory"].as<bool>();
     }
-    if (mlock) {
+
+    if (mlock)
+    {
         auto r = mlockall(MCL_CURRENT | MCL_FUTURE);
-        if (r) {
+        if (r)
+        {
             // Don't hard fail for now, it's hard to get the configuration right
             fmt::print("warning: failed to mlockall: {}\n", strerror(errno));
         }
@@ -3773,23 +3910,28 @@ void smp::configure(boost::program_options::variables_map configuration, reactor
 
     disk_config_params disk_config;
     disk_config.parse_config(configuration);
-    for (auto& id : disk_config.device_ids()) {
+    for (auto& id : disk_config.device_ids())
+    {
         rc.num_io_queues.emplace(id, disk_config.num_io_queues(id));
     }
 
     auto resources = resource::allocate(rc);
     std::vector<resource::cpu> allocations = std::move(resources.cpus);
-    if (thread_affinity) {
+    if (thread_affinity)
+    {
         smp::pin(allocations[0].cpu_id);
     }
+
     memory::configure(allocations[0].mem, mbind, hugepages_path);
 
-    if (configuration.count("abort-on-seastar-bad-alloc")) {
+    if (configuration.count("abort-on-seastar-bad-alloc"))
+    {
         memory::enable_abort_on_allocation_failure();
     }
 
     bool heapprof_enabled = configuration.count("heapprof");
-    if (heapprof_enabled) {
+    if (heapprof_enabled)
+    {
         memory::set_heap_profiling_enabled(heapprof_enabled);
     }
 
@@ -3813,7 +3955,8 @@ void smp::configure(boost::program_options::variables_map configuration, reactor
 
     std::unordered_map<dev_t, std::vector<io_queue*>> all_io_queues;
 
-    for (auto& id : disk_config.device_ids()) {
+    for (auto& id : disk_config.device_ids())
+    {
         auto io_info = ioq_topology.at(id);
         all_io_queues.emplace(id, io_info.coordinators.size());
     }
@@ -3823,7 +3966,9 @@ void smp::configure(boost::program_options::variables_map configuration, reactor
         auto cid = io_info.shard_to_coordinator[shard];
         auto vec_idx = io_info.coordinator_to_idx[cid];
         assert(io_info.coordinator_to_idx_valid[cid]);
-        if (shard == cid) {
+
+        if (shard == cid)
+        {
             struct io_queue::config cfg = disk_config.generate_config(id);
             cfg.coordinator = cid;
             cfg.io_topology = io_info.shard_to_coordinator;
@@ -3837,7 +3982,9 @@ void smp::configure(boost::program_options::variables_map configuration, reactor
         auto io_info = ioq_topology.at(dev_id);
         auto cid = io_info.shard_to_coordinator[shard_id];
         auto queue_idx = io_info.coordinator_to_idx[cid];
-        if (all_io_queues[dev_id][queue_idx]->coordinator() == shard_id) {
+
+        if (all_io_queues[dev_id][queue_idx]->coordinator() == shard_id)
+        {
             engine().my_io_queues.emplace_back(all_io_queues[dev_id][queue_idx]);
         }
         engine()._io_queues.emplace(dev_id, all_io_queues[dev_id][queue_idx]);
@@ -3847,59 +3994,82 @@ void smp::configure(boost::program_options::variables_map configuration, reactor
 
     auto backend_selector = configuration["reactor-backend"].as<reactor_backend_selector>();
 
+    /* 为除了 cpu0 之外的所有 cpu core（也可以配置成只使用部分 cpu core）起一个线程，线程中分配一块内存给 reactor 类对象，每个线程都有这个对象，
+     * 然后调用 reactor.run() 方法开始运行线程。 */
     unsigned i;
-    for (i = 1; i < smp::count; i++) {
+    for (i = 1; i < smp::count; i++)
+    {
         auto allocation = allocations[i];
         create_thread([configuration, &disk_config, hugepages_path, i, allocation, assign_io_queue, alloc_io_queue, thread_affinity, heapprof_enabled, mbind, backend_selector, reactor_cfg] {
-          try {
-            auto thread_name = seastar::format("reactor-{}", i);
-            pthread_setname_np(pthread_self(), thread_name.c_str());
-            if (thread_affinity) {
-                smp::pin(allocation.cpu_id);
+            try
+            {
+                auto thread_name = seastar::format("reactor-{}", i);
+                pthread_setname_np(pthread_self(), thread_name.c_str());
+                if (thread_affinity)
+                {
+                    smp::pin(allocation.cpu_id);        // 将线程绑定到 cpu 上
+                }
+
+                memory::configure(allocation.mem, mbind, hugepages_path);
+                if (heapprof_enabled)
+                {
+                    memory::set_heap_profiling_enabled(heapprof_enabled);
+                }
+
+                sigset_t mask;
+                sigfillset(&mask);
+                for (auto sig : { SIGSEGV })
+                {
+                    sigdelset(&mask, sig);
+                }
+
+                auto r = ::pthread_sigmask(SIG_BLOCK, &mask, NULL);
+                throw_pthread_error(r);
+                init_default_smp_service_group(i);
+                allocate_reactor(i, backend_selector, reactor_cfg);     // 各子线程创建 reactor 实例
+                _reactors[i] = &engine();
+
+                for (auto& dev_id : disk_config.device_ids())
+                {
+                    alloc_io_queue(i, dev_id);
+                }
+
+                reactors_registered.wait();
+                smp_queues_constructed.wait();
+                start_all_queues();
+
+                for (auto& dev_id : disk_config.device_ids())
+                {
+                    assign_io_queue(i, dev_id);
+                }
+
+                inited.wait();
+                engine().configure(configuration);
+                // engine() 返回的是 reactor 对象，每一个线程都有一个 reactor 对象
+                engine().run();     // 开始运行线程
             }
-            memory::configure(allocation.mem, mbind, hugepages_path);
-            if (heapprof_enabled) {
-                memory::set_heap_profiling_enabled(heapprof_enabled);
+            catch (const std::exception& e)
+            {
+                seastar_logger.error(e.what());
+                _exit(1);
             }
-            sigset_t mask;
-            sigfillset(&mask);
-            for (auto sig : { SIGSEGV }) {
-                sigdelset(&mask, sig);
-            }
-            auto r = ::pthread_sigmask(SIG_BLOCK, &mask, NULL);
-            throw_pthread_error(r);
-            init_default_smp_service_group(i);
-            allocate_reactor(i, backend_selector, reactor_cfg);
-            _reactors[i] = &engine();
-            for (auto& dev_id : disk_config.device_ids()) {
-                alloc_io_queue(i, dev_id);
-            }
-            reactors_registered.wait();
-            smp_queues_constructed.wait();
-            start_all_queues();
-            for (auto& dev_id : disk_config.device_ids()) {
-                assign_io_queue(i, dev_id);
-            }
-            inited.wait();
-            engine().configure(configuration);
-            engine().run();
-          } catch (const std::exception& e) {
-              seastar_logger.error(e.what());
-              _exit(1);
-          }
         });
     }
 
     init_default_smp_service_group(0);
-    try {
-        allocate_reactor(0, backend_selector, reactor_cfg);
-    } catch (const std::exception& e) {
+    try
+    {
+        allocate_reactor(0, backend_selector, reactor_cfg);     // 主线程创建 reactor 实例
+    }
+    catch (const std::exception& e)
+    {
         seastar_logger.error(e.what());
         _exit(1);
     }
 
     _reactors[0] = &engine();
-    for (auto& dev_id : disk_config.device_ids()) {
+    for (auto& dev_id : disk_config.device_ids())
+    {
         alloc_io_queue(0, dev_id);
     }
 
@@ -3914,16 +4084,20 @@ void smp::configure(boost::program_options::variables_map configuration, reactor
 
     reactors_registered.wait();
     smp::_qs = decltype(smp::_qs){new smp_message_queue* [smp::count], qs_deleter{}};
-    for(unsigned i = 0; i < smp::count; i++) {
+    for(unsigned i = 0; i < smp::count; i++)
+    {
         smp::_qs[i] = reinterpret_cast<smp_message_queue*>(operator new[] (sizeof(smp_message_queue) * smp::count));
-        for (unsigned j = 0; j < smp::count; ++j) {
+        for (unsigned j = 0; j < smp::count; ++j)
+        {
             new (&smp::_qs[i][j]) smp_message_queue(_reactors[j], _reactors[i]);
         }
     }
+
     alien::smp::_qs = alien::smp::create_qs(_reactors);
     smp_queues_constructed.wait();
     start_all_queues();
-    for (auto& dev_id : disk_config.device_ids()) {
+    for (auto& dev_id : disk_config.device_ids())
+    {
         assign_io_queue(0, dev_id);
     }
     inited.wait();

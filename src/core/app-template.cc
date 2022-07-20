@@ -135,30 +135,40 @@ app_template::run(int ac, char ** av, std::function<future<> ()>&& func) {
 }
 
 int
-app_template::run_deprecated(int ac, char ** av, std::function<void ()>&& func) {
+app_template::run_deprecated(int ac, char ** av, std::function<void ()>&& func)
+{
 #ifdef SEASTAR_DEBUG
     fmt::print("WARNING: debug mode. Not for benchmarking or production\n");
 #endif
     bpo::variables_map configuration;
-    try {
+    try
+    {
         bpo::store(bpo::command_line_parser(ac, av)
                     .options(_opts)
                     .positional(_pos_opts)
                     .run()
             , configuration);
         _conf_reader(configuration);
-    } catch (bpo::error& e) {
+    }
+    catch (bpo::error& e)
+    {
         fmt::print("error: {}\n\nTry --help.\n", e.what());
         return 2;
     }
-    if (configuration.count("help")) {
-        if (!_cfg.description.empty()) {
+
+    if (configuration.count("help"))
+    {
+        if (!_cfg.description.empty())
+        {
             std::cout << _cfg.description << "\n";
         }
+
         std::cout << _opts << "\n";
         return 1;
     }
-    if (configuration["help-loggers"].as<bool>()) {
+
+    if (configuration["help-loggers"].as<bool>())
+    {
         log_cli::print_available_loggers(std::cout);
         return 1;
     }
@@ -166,40 +176,79 @@ app_template::run_deprecated(int ac, char ** av, std::function<void ()>&& func) 
     bpo::notify(configuration);
 
     // Needs to be before `smp::configure()`.
-    try {
+    try
+    {
         apply_logging_settings(log_cli::extract_settings(configuration));
-    } catch (const std::runtime_error& exn) {
+    }
+    catch (const std::runtime_error& exn)
+    {
         std::cout << "logging configuration error: " << exn.what() << '\n';
         return 1;
     }
 
     configuration.emplace("argv0", boost::program_options::variable_value(std::string(av[0]), false));
-    try {
-        smp::configure(configuration, reactor_config_from_app_config(_cfg));
-    } catch (...) {
+
+    try
+    {
+        smp::configure(configuration, reactor_config_from_app_config(_cfg));        // 创建并运行线程
+    }
+    catch (...)
+    {
         std::cerr << "Could not initialize seastar: " << std::current_exception() << std::endl;
         return 1;
     }
+
     _configuration = {std::move(configuration)};
+
+    /**
+     * 关于以下 engine().when_started().then(func1).then(func2).then(func3).then_wrapeed() 链式调用的解释:
+     * 1. engine(): 返回的是 reactor 实例.
+     *   1.1 每个线程都有一个 reactor 实例
+     *   1.2 每个 reactor 实例对应着一个 promise => _start_promise
+     *   1.3 每个 promise 对应着一个 future, 通过 get_future() 接口获取
+     *
+     * 2. when_started(): 返回的是 reactor 实例下 _start_promise 的 future
+     *
+     * 3. then(func1):
+     *   3.1 将 func1 封装到 continuation 中，然后将 continuation 绑定到 _start_promise 的 task 上
+     *   3.2 创建新的 promise 和新的 future, then(func1) 接口返回后，会用新创建的 future 调用下一个 then(func2)
+     *   3.3 当在 engine().run() 中执行 _start_promise 的 set_value 时, task 会被添加到 reactor 的任务队列并执行；在执行具体的 task 时，
+     * 会在 satisfy_with_result_of() 中执行 (3.2) 新创建的 promise 的 set_value. (然后会将新创建的 promise 上绑定的 task 添加到 reactor 的任务队列中)
+     *
+     * 4. then(func2)
+     *   4.1 调用该 then 接口的是 (3.2) 创建的新的 future, 该 then 调用仍然是先将 func2 封装到 continuation 中，然后将其绑定到新的 promise 的 task 上
+     *   4.2 创建新的 promise 和新的 future, 然后进行下一次的 then 调用
+     *   4.3 当 3.3 中执行新的 promise.set_value() 之后, 本次调用的 task 又会被添加到 reactor 的任务队列, 当在 reactor 中执行 task 时，
+     * 会调用本次新创建的 promise 的 set_value (下一次 then 调用中的任务又会被添加到任务队列然后被执行)
+     *
+     * 5. then(func3) 执行过程和上面相同
+     */
+
     // No need to wait for this future.
     // func is waited on via engine().run()
-    (void)engine().when_started().then([this] {
+    (void)engine()
+    .when_started()
+    .then([this] {
         return seastar::metrics::configure(this->configuration()).then([this] {
             // set scollectd use the metrics configuration, so the later
             // need to be set first
             scollectd::configure( this->configuration());
         });
-    }).then(
-        std::move(func)
-    ).then_wrapped([] (auto&& f) {
-        try {
+    })
+    .then(std::move(func))
+    .then_wrapped([] (auto&& f) {
+        try
+        {
             f.get();
-        } catch (std::exception& ex) {
+        }
+        catch (std::exception& ex)
+        {
             std::cout << "program failed with uncaught exception: " << ex.what() << "\n";
             engine().exit(1);
         }
     });
-    auto exit_code = engine().run();
+
+    auto exit_code = engine().run();   // 主线程进入 while 循环, 会触发 _start_promise 的 set_value 调用
     smp::cleanup();
     return exit_code;
 }

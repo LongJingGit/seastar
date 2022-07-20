@@ -360,9 +360,12 @@ public:
     future<connected_socket> connect(socket_address sa, socket_address = {}, transport proto = transport::TCP);
     virtual ::seastar::socket socket() = 0;
     virtual net::udp_channel make_udp_channel(const socket_address& = {}) = 0;
-    virtual future<> initialize() {
-        return make_ready_future();
+
+    virtual future<> initialize()
+    {
+        return make_ready_future();     // 返回一个已经在就绪态的 future
     }
+
     virtual bool has_per_core_namespace() = 0;
     // NOTE: this is not a correct query approach.
     // This question should be per NIC, but we have no such
@@ -371,8 +374,8 @@ public:
         return false;
     }
 
-    /** 
-     * Returns available network interfaces. This represents a 
+    /**
+     * Returns available network interfaces. This represents a
      * snapshot of interfaces available at call time, hence the
      * return by value.
      */

@@ -40,16 +40,20 @@ namespace seastar {
 ///            ready.
 /// \return A \ref future which becomes ready when the sleep duration elapses.
 template <typename Clock = steady_clock_type, typename Rep, typename Period>
-future<> sleep(std::chrono::duration<Rep, Period> dur) {
-    struct sleeper {
+future<> sleep(std::chrono::duration<Rep, Period> dur)
+{
+    struct sleeper
+    {
         promise<> done;
         timer<Clock> tmr;
+
         sleeper(std::chrono::duration<Rep, Period> dur)
-            : tmr([this] { done.set_value(); })
+            : tmr([this] { done.set_value(); })     // 注册定时器回调，定时器到期后会执行 promise 的 set_value
         {
             tmr.arm(dur);
         }
     };
+
     sleeper *s = new sleeper(dur);
     future<> fut = s->done.get_future();
     return fut.then([s] { delete s; });

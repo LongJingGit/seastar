@@ -66,7 +66,8 @@ posix_thread::posix_thread(std::function<void ()> func)
 }
 
 posix_thread::posix_thread(attr a, std::function<void ()> func)
-    : _func(std::make_unique<std::function<void ()>>(std::move(func))) {
+    : _func(std::make_unique<std::function<void ()>>(std::move(func)))
+{
     pthread_attr_t pa;
     auto r = pthread_attr_init(&pa);
     if (r) {
@@ -92,8 +93,7 @@ posix_thread::posix_thread(attr a, std::function<void ()> func)
     }
 #endif
 
-    r = pthread_create(&_pthread, &pa,
-                &posix_thread::start_routine, _func.get());
+    r = pthread_create(&_pthread, &pa, &posix_thread::start_routine, _func.get());
     if (r) {
         throw std::system_error(r, std::system_category());
     }
