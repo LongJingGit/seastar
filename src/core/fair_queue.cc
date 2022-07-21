@@ -158,10 +158,13 @@ void fair_queue::notify_requests_finished(fair_queue_ticket desc) {
     _resources_executing -= desc;
 }
 
-void fair_queue::dispatch_requests() {
-    while (can_dispatch()) {
+void fair_queue::dispatch_requests()
+{
+    while (can_dispatch())
+    {
         priority_class_ptr h;
-        do {
+        do
+        {
             h = pop_priority_class();
         } while (h->_queue.empty());
 
@@ -176,23 +179,29 @@ void fair_queue::dispatch_requests() {
         auto req_cost  = req.desc.normalize(_maximum_capacity) / h->_shares;
         auto cost  = expf(1.0f/_config.tau.count() * delta.count()) * req_cost;
         float next_accumulated = h->_accumulated + cost;
-        while (std::isinf(next_accumulated)) {
+
+        while (std::isinf(next_accumulated))
+        {
             normalize_stats();
             // If we have renormalized, our time base will have changed. This should happen very infrequently
             delta = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - _base);
             cost  = expf(1.0f/_config.tau.count() * delta.count()) * req_cost;
             next_accumulated = h->_accumulated + cost;
         }
+
         h->_accumulated = next_accumulated;
 
-        if (!h->_queue.empty()) {
+        if (!h->_queue.empty())
+        {
             push_priority_class(h);
         }
-        req.func();
+
+        req.func();         // engine().submit_io
     }
 }
 
-void fair_queue::update_shares(priority_class_ptr pc, uint32_t new_shares) {
+void fair_queue::update_shares(priority_class_ptr pc, uint32_t new_shares)
+{
     pc->update_shares(new_shares);
 }
 

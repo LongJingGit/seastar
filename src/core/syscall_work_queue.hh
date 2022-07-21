@@ -30,23 +30,28 @@
 
 namespace seastar {
 
-class syscall_work_queue {
+class syscall_work_queue
+{
     static constexpr size_t queue_length = 128;
     struct work_item;
-    using lf_queue = boost::lockfree::spsc_queue<work_item*,
-                            boost::lockfree::capacity<queue_length>>;
+
+    using lf_queue = boost::lockfree::spsc_queue<work_item*, boost::lockfree::capacity<queue_length>>;
     lf_queue _pending;
     lf_queue _completed;
     writeable_eventfd _start_eventfd;
     semaphore _queue_has_room = { queue_length };
-    struct work_item {
+
+    struct work_item
+    {
         virtual ~work_item() {}
         virtual void process() = 0;
         virtual void complete() = 0;
         virtual void set_exception(std::exception_ptr) = 0;
     };
+
     template <typename T>
-    struct work_item_returning :  work_item {
+    struct work_item_returning :  work_item
+    {
         noncopyable_function<T ()> _func;
         promise<T> _promise;
         compat::optional<T> _result;
@@ -56,10 +61,13 @@ class syscall_work_queue {
         virtual void set_exception(std::exception_ptr eptr) override { _promise.set_exception(eptr); };
         future<T> get_future() { return _promise.get_future(); }
     };
+
 public:
     syscall_work_queue();
+
     template <typename T>
-    future<T> submit(noncopyable_function<T ()> func) noexcept {
+    future<T> submit(noncopyable_function<T ()> func) noexcept
+    {
       try {
         auto wi = std::make_unique<work_item_returning<T>>(std::move(func));
         auto fut = wi->get_future();
@@ -69,6 +77,7 @@ public:
         return internal::current_exception_as_future<T>();
       }
     }
+
 private:
     void work();
     // Scans the _completed queue, that contains the requests already handled by the syscall thread,

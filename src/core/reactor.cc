@@ -226,12 +226,23 @@ reactor::rename_priority_class(io_priority_class pc, sstring new_name) {
 }
 
 future<std::tuple<pollable_fd, socket_address>>
-reactor::do_accept(pollable_fd_state& listenfd) {
+reactor::do_accept(pollable_fd_state& listenfd)
+{
+    /**
+     * 注意: 这里的异步任务指的是监听 socket 上的连接事件, 由内核去监听
+     *
+     * readable_or_writeable: 将异步任务添加到 iocbs 中，由 kernel_submit_work_pollfn::poll 将异步任务递交给内核, reap_kernel_completions_pollfn::poll 中会检查内核是否完成了异步任务.
+     *
+     * readable_or_writeable() 返回的是一个非就绪态的 future, 如何内核完成了异步io, 则会执行 promise.set_value(),
+     * 然后 then 中的任务就会被添加到 reactor 的任务队列继而被执行
+     */
     return readable_or_writeable(listenfd).then([this, &listenfd] () mutable {
         socket_address sa;
         listenfd.maybe_no_more_recv();
-        auto maybe_fd = listenfd.fd.try_accept(sa, SOCK_NONBLOCK | SOCK_CLOEXEC);
-        if (!maybe_fd) {
+
+        auto maybe_fd = listenfd.fd.try_accept(sa, SOCK_NONBLOCK | SOCK_CLOEXEC);       // 接收连接, 返回接收连接描述符
+        if (!maybe_fd)
+        {
             // We speculated that we will have an another connection, but got a false
             // positive. Try again without speculation.
             return do_accept(listenfd);
@@ -241,7 +252,9 @@ reactor::do_accept(pollable_fd_state& listenfd) {
         // that it is worth the false positive in order to withstand a connection storm
         // without having to accept at a rate of 1 per task quota.
         listenfd.speculate_epoll(EPOLLIN);
-        pollable_fd pfd(std::move(*maybe_fd), pollable_fd::speculation(EPOLLOUT));
+        pollable_fd pfd(std::move(*maybe_fd), pollable_fd::speculation(EPOLLOUT));// 注册连接socket的可写事件, 读操作的时候才会注册可读事件
+
+        // 注意: 这里返回的是一个就绪态的 future, 也就是说 .then(func) 中的 func 会被直接添加到 reactor 的任务队列, 不用等待 promise.set_value
         return make_ready_future<std::tuple<pollable_fd, socket_address>>(std::make_tuple(std::move(pfd), std::move(sa)));
     });
 }
@@ -272,10 +285,13 @@ reactor::do_read_some(pollable_fd_state& fd, void* buffer, size_t len) {
 }
 
 future<temporary_buffer<char>>
-reactor::do_read_some(pollable_fd_state& fd, internal::buffer_allocator* ba) {
+reactor::do_read_some(pollable_fd_state& fd, internal::buffer_allocator* ba)
+{
+    /* fd.readable(): 将连接 socket 的 POLLIN 事件封装成异步 io，并且在后面的两次 poller 中分别将异步 io 递交给内核, 然后检查内核的
+     * 异步任务是否完成. 如果异步任务完成了，则会执行 .then 中的 lambda 任务 */
     return fd.readable().then([this, &fd, ba] {
         auto buffer = ba->allocate_buffer();
-        auto r = fd.fd.read(buffer.get_write(), buffer.size());
+        auto r = fd.fd.read(buffer.get_write(), buffer.size());     // 从连接 socket 读取数据
         if (!r) {
             // Speculation failure, try again with real polling this time
             // Note we release the buffer and will reallocate it when poll
@@ -286,7 +302,7 @@ reactor::do_read_some(pollable_fd_state& fd, internal::buffer_allocator* ba) {
             fd.speculate_epoll(EPOLLIN);
         }
         buffer.trim(*r);
-        return make_ready_future<temporary_buffer<char>>(std::move(buffer));
+        return make_ready_future<temporary_buffer<char>>(std::move(buffer));    // 返回的是就绪 future
     });
 }
 
@@ -1506,7 +1522,7 @@ sstring io_request::opname() const {
 void
 reactor::submit_io(kernel_completion* desc, io_request req) {
     req.attach_kernel_completion(desc);
-    _pending_io.push_back(std::move(req));
+    _pending_io.push_back(std::move(req));  // 将异步 io 任务保存到 _pending_io 中，在 kernel_submit_work_pollfn::poll 中将异步 io 递交给内核
 }
 
 bool
@@ -2156,15 +2172,20 @@ void reactor::run_tasks(task_queue& tq)
         tasks.pop_front();
         STAP_PROBE(seastar, reactor_run_tasks_single_start);
         task_histogram_add_task(*tsk);
-        tsk->run_and_dispose();     // 执行 task. 实际上是在执行 continuation::run_and_dispose. continuation 是 task 的派生类
+        tsk->run_and_dispose();     // 执行 task.
         STAP_PROBE(seastar, reactor_run_tasks_single_end);
         ++tq._tasks_processed;
         ++_global_tasks_processed;
+
         // check at end of loop, to allow at least one task to run
-        if (need_preempt()) {
-            if (tasks.size() <= _max_task_backlog) {
+        if (need_preempt())
+        {
+            if (tasks.size() <= _max_task_backlog)
+            {
                 break;
-            } else {
+            }
+            else
+            {
                 // While need_preempt() is set, task execution is inefficient due to
                 // need_preempt() checks breaking out of loops and .then() calls. See
                 // #302.
@@ -2247,87 +2268,122 @@ reactor::do_check_lowres_timers() const {
 
 #ifndef HAVE_OSV
 
-class reactor::kernel_submit_work_pollfn final : public reactor::pollfn {
+class reactor::kernel_submit_work_pollfn final : public reactor::pollfn
+{
     reactor& _r;
 public:
     kernel_submit_work_pollfn(reactor& r) : _r(r) {}
-    virtual bool poll() override final {
+
+    virtual bool poll() override final
+    {
         return _r._backend->kernel_submit_work();
     }
-    virtual bool pure_poll() override final {
+
+    virtual bool pure_poll() override final
+    {
         return poll(); // actually performs work, but triggers no user continuations, so okay
     }
-    virtual bool try_enter_interrupt_mode() override {
+
+    virtual bool try_enter_interrupt_mode() override
+    {
         return true;
     }
-    virtual void exit_interrupt_mode() override {
+
+    virtual void exit_interrupt_mode() override
+    {
         // nothing to do
     }
 };
 
 #endif
 
-class reactor::signal_pollfn final : public reactor::pollfn {
+class reactor::signal_pollfn final : public reactor::pollfn
+{
     reactor& _r;
+
 public:
     signal_pollfn(reactor& r) : _r(r) {}
-    virtual bool poll() final override {
+
+    virtual bool poll() final override
+    {
         return _r._signals.poll_signal();
     }
-    virtual bool pure_poll() override final {
+
+    virtual bool pure_poll() override final
+    {
         return _r._signals.pure_poll_signal();
     }
-    virtual bool try_enter_interrupt_mode() override {
+
+    virtual bool try_enter_interrupt_mode() override
+    {
         // Signals will interrupt our epoll_pwait() call, but
         // disable them now to avoid a signal between this point
         // and epoll_pwait()
         sigset_t block_all;
         sigfillset(&block_all);
         ::pthread_sigmask(SIG_SETMASK, &block_all, &_r._active_sigmask);
-        if (poll()) {
+        if (poll())
+        {
             // raced already, and lost
             exit_interrupt_mode();
             return false;
         }
+
         return true;
     }
-    virtual void exit_interrupt_mode() override final {
+
+    virtual void exit_interrupt_mode() override final
+    {
         ::pthread_sigmask(SIG_SETMASK, &_r._active_sigmask, nullptr);
     }
 };
 
-class reactor::batch_flush_pollfn final : public reactor::pollfn {
+class reactor::batch_flush_pollfn final : public reactor::pollfn
+{
     reactor& _r;
+
 public:
     batch_flush_pollfn(reactor& r) : _r(r) {}
-    virtual bool poll() final override {
+
+    virtual bool poll() final override
+    {
         return _r.flush_tcp_batches();
     }
-    virtual bool pure_poll() override final {
+
+    virtual bool pure_poll() override final
+    {
         return poll(); // actually performs work, but triggers no user continuations, so okay
     }
-    virtual bool try_enter_interrupt_mode() override {
+
+    virtual bool try_enter_interrupt_mode() override
+    {
         // This is a passive poller, so if a previous poll
         // returned false (idle), there's no more work to do.
         return true;
     }
-    virtual void exit_interrupt_mode() override final {
-    }
+
+    virtual void exit_interrupt_mode() override final {}
 };
 
-class reactor::reap_kernel_completions_pollfn final : public reactor::pollfn {
+class reactor::reap_kernel_completions_pollfn final : public reactor::pollfn
+{
     reactor& _r;
+
 public:
     reap_kernel_completions_pollfn(reactor& r) : _r(r) {}
+
     virtual bool poll() final override {
         return _r.reap_kernel_completions();
     }
+
     virtual bool pure_poll() override final {
         return poll(); // actually performs work, but triggers no user continuations, so okay
     }
+
     virtual bool try_enter_interrupt_mode() override {
         return _r._backend->kernel_events_can_sleep();
     }
+
     virtual void exit_interrupt_mode() override final {
     }
 };
@@ -2359,15 +2415,21 @@ public:
     virtual void exit_interrupt_mode() override final {}
 };
 
-class reactor::drain_cross_cpu_freelist_pollfn final : public reactor::pollfn {
+class reactor::drain_cross_cpu_freelist_pollfn final : public reactor::pollfn
+{
 public:
-    virtual bool poll() final override {
+    virtual bool poll() final override
+    {
         return memory::drain_cross_cpu_freelist();
     }
-    virtual bool pure_poll() override final {
+
+    virtual bool pure_poll() override final
+    {
         return poll(); // actually performs work, but triggers no user continuations, so okay
     }
-    virtual bool try_enter_interrupt_mode() override {
+
+    virtual bool try_enter_interrupt_mode() override
+    {
         // Other cpus can queue items for us to free; and they won't notify
         // us about them.  But it's okay to ignore those items, freeing them
         // doesn't have any side effects.
@@ -2375,25 +2437,30 @@ public:
         // We'll take care of those items when we wake up for another reason.
         return true;
     }
-    virtual void exit_interrupt_mode() override final {
-    }
+
+    virtual void exit_interrupt_mode() override final {}
 };
 
-class reactor::lowres_timer_pollfn final : public reactor::pollfn {
+class reactor::lowres_timer_pollfn final : public reactor::pollfn
+{
     reactor& _r;
     // A highres timer is implemented as a waking  signal; so
     // we arm one when we have a lowres timer during sleep, so
     // it can wake us up.
     timer<> _nearest_wakeup { [this] { _armed = false; } };
     bool _armed = false;
+
 public:
     lowres_timer_pollfn(reactor& r) : _r(r) {}
+
     virtual bool poll() final override {
         return _r.do_expire_lowres_timers();
     }
+
     virtual bool pure_poll() final override {
         return _r.do_check_lowres_timers();
     }
+
     virtual bool try_enter_interrupt_mode() override {
         // arm our highres timer so a signal will wake us up
         auto next = _r._lowres_next_timeout;
@@ -2410,6 +2477,7 @@ public:
         _armed = true;
         return true;
     }
+
     virtual void exit_interrupt_mode() override final {
         if (_armed) {
             _nearest_wakeup.cancel();
@@ -2418,68 +2486,90 @@ public:
     }
 };
 
-class reactor::smp_pollfn final : public reactor::pollfn {
+class reactor::smp_pollfn final : public reactor::pollfn
+{
     reactor& _r;
+
 public:
     smp_pollfn(reactor& r) : _r(r) {}
-    virtual bool poll() final override {
-        return (smp::poll_queues() |
-                alien::smp::poll_queues());
+
+    virtual bool poll() final override
+    {
+        return (smp::poll_queues() | alien::smp::poll_queues());
     }
-    virtual bool pure_poll() final override {
-        return (smp::pure_poll_queues() ||
-                alien::smp::pure_poll_queues());
+
+    virtual bool pure_poll() final override
+    {
+        return (smp::pure_poll_queues() || alien::smp::pure_poll_queues());
     }
-    virtual bool try_enter_interrupt_mode() override {
+
+    virtual bool try_enter_interrupt_mode() override
+    {
         // systemwide_memory_barrier() is very slow if run concurrently,
         // so don't go to sleep if it is running now.
         _r._sleeping.store(true, std::memory_order_relaxed);
         bool barrier_done = try_systemwide_memory_barrier();
-        if (!barrier_done) {
+        if (!barrier_done)
+        {
             _r._sleeping.store(false, std::memory_order_relaxed);
             return false;
         }
-        if (poll()) {
+
+        if (poll())
+        {
             // raced
             _r._sleeping.store(false, std::memory_order_relaxed);
             return false;
         }
+
         return true;
     }
-    virtual void exit_interrupt_mode() override final {
+
+    virtual void exit_interrupt_mode() override final
+    {
         _r._sleeping.store(false, std::memory_order_relaxed);
     }
 };
 
-class reactor::execution_stage_pollfn final : public reactor::pollfn {
+class reactor::execution_stage_pollfn final : public reactor::pollfn
+{
     internal::execution_stage_manager& _esm;
+
 public:
     execution_stage_pollfn() : _esm(internal::execution_stage_manager::get()) { }
 
     virtual bool poll() override {
         return _esm.flush();
     }
+
     virtual bool pure_poll() override {
         return _esm.poll();
     }
+
     virtual bool try_enter_interrupt_mode() override {
         // This is a passive poller, so if a previous poll
         // returned false (idle), there's no more work to do.
         return true;
     }
+
     virtual void exit_interrupt_mode() override { }
 };
 
-class reactor::syscall_pollfn final : public reactor::pollfn {
+class reactor::syscall_pollfn final : public reactor::pollfn
+{
     reactor& _r;
+
 public:
     syscall_pollfn(reactor& r) : _r(r) {}
+
     virtual bool poll() final override {
         return _r._thread_pool->complete();
     }
+
     virtual bool pure_poll() override final {
         return poll(); // actually performs work, but triggers no user continuations, so okay
     }
+
     virtual bool try_enter_interrupt_mode() override {
         _r._thread_pool->enter_interrupt_mode();
         if (poll()) {
@@ -2489,6 +2579,7 @@ public:
         }
         return true;
     }
+
     virtual void exit_interrupt_mode() override final {
         _r._thread_pool->exit_interrupt_mode();
     }
@@ -2662,18 +2753,23 @@ int reactor::run()
     // We will run the pollers in the following order:
     //
     // 1. SMP: any remote event arrives before anything else
-    // 2. reap kernel events completion: storage related completions may free up space in the I/O
-    //                                   queue.
+    // 2. reap kernel events completion: storage related completions may free up space in the I/O queue.
     // 4. I/O queue: must be after reap, to free up events. If new slots are freed may submit I/O
     // 5. kernel submission: for I/O, will submit what was generated from last step.
     // 6. reap kernel events completion: some of the submissions from last step may return immediately.
     //                                   For example if we are dealing with poll() on a fd that has events.
+
+    /**
+     * 创建多个事件循环的 poller, 会在 poller 的构造函数中将这些 poller 封装成 registration_task, 然后将这些 task 放到 reactor 的任务队列中，
+     * 然后由 reactor 在事件循环中将 poller 添加到 _pollers 里面
+     */
+
     poller smp_poller(std::make_unique<smp_pollfn>(*this));
 
     poller reap_kernel_completions_poller(std::make_unique<reap_kernel_completions_pollfn>(*this));
-    poller io_queue_submission_poller(std::make_unique<io_queue_submission_pollfn>(*this));     // 处理 IO 任务的 poller
-    poller kernel_submit_work_poller(std::make_unique<kernel_submit_work_pollfn>(*this));
-    poller final_real_kernel_completions_poller(std::make_unique<reap_kernel_completions_pollfn>(*this));
+    poller io_queue_submission_poller(std::make_unique<io_queue_submission_pollfn>(*this));// 把异步 io 保存到 _pending_io 中(不是所有类型的任务都会使用该 poller 将异步io添加到 _pend_io 中，比如网络socket)
+    poller kernel_submit_work_poller(std::make_unique<kernel_submit_work_pollfn>(*this));      // 将异步 io 递交给内核
+    poller final_real_kernel_completions_poller(std::make_unique<reap_kernel_completions_pollfn>(*this)); // 查询内核是否已完成异步 io
 
     poller batch_flush_poller(std::make_unique<batch_flush_pollfn>(*this));
     poller execution_stage_poller(std::make_unique<execution_stage_pollfn>());
@@ -2686,6 +2782,7 @@ int reactor::run()
        {
           _signals.handle_signal_once(SIGINT, [this] { stop(); });
        }
+
        _signals.handle_signal_once(SIGTERM, [this] { stop(); });
     }
 
@@ -2738,11 +2835,14 @@ int reactor::run()
         load = std::min(load, 1.0);
         idle_start = idle_end;
         _loads.push_front(load);
-        if (_loads.size() > 5) {
+
+        if (_loads.size() > 5)
+        {
             auto drop = _loads.back();
             _loads.pop_back();
             _load -= (drop/5);
         }
+
         _load += (load/5);
     });
 
@@ -2796,7 +2896,7 @@ int reactor::run()
 
         _polls++;
 
-        if (check_for_work())   // check_for_work() 中会调用 reactor::poller_once 方法
+        if (check_for_work())   // 调用所有 poller 的 poll 方法
         {
             if (idle)
             {
@@ -2821,7 +2921,7 @@ int reactor::run()
                 // we can't run check_for_work(), because that can run tasks in the context
                 // of the idle handler which change its state, without the idle handler expecting
                 // it.  So run pure_check_for_work() instead.
-                auto handler_result = _idle_cpu_handler(pure_check_for_work);
+                auto handler_result = _idle_cpu_handler(pure_check_for_work);       // 调用所有 poller 的 pure_poll 方法
                 go_to_sleep = handler_result == idle_cpu_handler_result::no_more_work;
             }
             catch (...)
@@ -2891,7 +2991,7 @@ bool
 reactor::poll_once()
 {
     bool work = false;
-    for (auto c : _pollers)
+    for (auto c : _pollers)     // 调用所有 poller 的 poll 方法
     {
         work |= c->poll();
     }
@@ -2902,7 +3002,7 @@ reactor::poll_once()
 bool
 reactor::pure_poll_once()
 {
-    for (auto c : _pollers)
+    for (auto c : _pollers)     // 调用所有 poller 的 pure_poll 方法
     {
         if (c->pure_poll())
         {
@@ -3040,21 +3140,26 @@ void syscall_work_queue::submit_item(std::unique_ptr<syscall_work_queue::work_it
             return;
         }
         _pending.push(item.release());
-        _start_eventfd.signal(1);
+        _start_eventfd.signal(1);           // 将任务递交给内核之后，唤醒 syscall 线程
     });
 }
 
-unsigned syscall_work_queue::complete() {
+unsigned syscall_work_queue::complete()
+{
     std::array<work_item*, queue_length> tmp_buf;
     auto end = tmp_buf.data();
+
     auto nr = _completed.consume_all([&] (work_item* wi) {
         *end++ = wi;
     });
-    for (auto p = tmp_buf.data(); p != end; ++p) {
+
+    for (auto p = tmp_buf.data(); p != end; ++p)
+    {
         auto wi = *p;
         wi->complete();
         delete wi;
     }
+
     _queue_has_room.signal(nr);
     return nr;
 }
@@ -3226,7 +3331,8 @@ size_t smp_message_queue::process_incoming() {
     return nr;
 }
 
-void smp_message_queue::start(unsigned cpuid) {
+void smp_message_queue::start(unsigned cpuid)
+{
     _tx.init();
     namespace sm = seastar::metrics;
     char instance[10];
@@ -3440,7 +3546,7 @@ thread_local std::unique_ptr<reactor, reactor_deleter> reactor_holder;
 std::vector<posix_thread> smp::_threads;
 std::vector<std::function<void ()>> smp::_thread_loops;
 compat::optional<boost::barrier> smp::_all_event_loops_done;
-std::vector<reactor*> smp::_reactors;
+std::vector<reactor*> smp::_reactors;           // 保存创建的所有 reactor. 0 号是主线程对应的 reactor
 std::unique_ptr<smp_message_queue*[], smp::qs_deleter> smp::_qs;
 std::thread::id smp::_tmain;
 unsigned smp::count = 1;
@@ -3448,11 +3554,14 @@ bool smp::_using_dpdk;
 
 void smp::start_all_queues()
 {
-    for (unsigned c = 0; c < count; c++) {
-        if (c != this_shard_id()) {
+    for (unsigned c = 0; c < count; c++)
+    {
+        if (c != this_shard_id())
+        {
             _qs[c][this_shard_id()].start(c);
         }
     }
+
     alien::smp::_qs[this_shard_id()].start();
 }
 
@@ -4027,7 +4136,7 @@ void smp::configure(boost::program_options::variables_map configuration, reactor
                 throw_pthread_error(r);
                 init_default_smp_service_group(i);
                 allocate_reactor(i, backend_selector, reactor_cfg);     // 各子线程创建 reactor 实例
-                _reactors[i] = &engine();
+                _reactors[i] = &engine();       // 将当前线程的 reactor 实例的指针保存到 _reactor 中
 
                 for (auto& dev_id : disk_config.device_ids())
                 {
@@ -4067,7 +4176,8 @@ void smp::configure(boost::program_options::variables_map configuration, reactor
         _exit(1);
     }
 
-    _reactors[0] = &engine();
+    _reactors[0] = &engine();       // 保存主线程的 reactor 实例的指针
+
     for (auto& dev_id : disk_config.device_ids())
     {
         alloc_io_queue(0, dev_id);
@@ -4083,7 +4193,9 @@ void smp::configure(boost::program_options::variables_map configuration, reactor
 #endif
 
     reactors_registered.wait();
+
     smp::_qs = decltype(smp::_qs){new smp_message_queue* [smp::count], qs_deleter{}};
+
     for(unsigned i = 0; i < smp::count; i++)
     {
         smp::_qs[i] = reinterpret_cast<smp_message_queue*>(operator new[] (sizeof(smp_message_queue) * smp::count));
@@ -4107,10 +4219,13 @@ void smp::configure(boost::program_options::variables_map configuration, reactor
     engine()._lowres_clock_impl = std::unique_ptr<lowres_clock_impl>(new lowres_clock_impl);
 }
 
-bool smp::poll_queues() {
+bool smp::poll_queues()
+{
     size_t got = 0;
-    for (unsigned i = 0; i < count; i++) {
-        if (this_shard_id() != i) {
+    for (unsigned i = 0; i < count; i++)
+    {
+        if (this_shard_id() != i)
+        {
             auto& rxq = _qs[this_shard_id()][i];
             rxq.flush_response_batch();
             got += rxq.has_unflushed_responses();
@@ -4120,17 +4235,23 @@ bool smp::poll_queues() {
             got += txq.process_completions(i);
         }
     }
+
     return got != 0;
 }
 
-bool smp::pure_poll_queues() {
-    for (unsigned i = 0; i < count; i++) {
-        if (this_shard_id() != i) {
+bool smp::pure_poll_queues()
+{
+    for (unsigned i = 0; i < count; i++)
+    {
+        if (this_shard_id() != i)
+        {
             auto& rxq = _qs[this_shard_id()][i];
             rxq.flush_response_batch();
             auto& txq = _qs[i][this_shard_id()];
             txq.flush_request_batch();
-            if (rxq.pure_poll_rx() || txq.pure_poll_tx() || rxq.has_unflushed_responses()) {
+
+            if (rxq.pure_poll_rx() || txq.pure_poll_tx() || rxq.has_unflushed_responses())
+            {
                 return true;
             }
         }

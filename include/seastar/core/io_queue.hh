@@ -60,9 +60,11 @@ using shard_id = unsigned;
 
 class io_priority_class;
 
-class io_queue {
+class io_queue
+{
 private:
-    struct priority_class_data {
+    struct priority_class_data
+    {
         priority_class_ptr ptr;
         size_t bytes;
         uint64_t ops;
@@ -71,6 +73,7 @@ private:
         metrics::metric_groups _metric_groups;
         priority_class_data(sstring name, sstring mountpoint, priority_class_ptr ptr, shard_id owner);
         void rename(sstring new_name, sstring mountpoint, shard_id owner);
+
     private:
         void register_stats(sstring name, sstring mountpoint, shard_id owner);
     };
@@ -95,6 +98,7 @@ private:
     // decoupling and is temporary
     size_t _queued_requests = 0;
     size_t _requests_executing = 0;
+
 public:
     // We want to represent the fact that write requests are (maybe) more expensive
     // than read requests. To avoid dealing with floating point math we will scale one
@@ -106,7 +110,8 @@ public:
     // writes will have an integer value lower than read_request_base_count.
     static constexpr unsigned read_request_base_count = 128;
 
-    struct config {
+    struct config
+    {
         shard_id coordinator;
         std::vector<shard_id> io_topology;
         unsigned capacity = std::numeric_limits<unsigned>::max();

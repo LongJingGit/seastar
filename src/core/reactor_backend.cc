@@ -168,7 +168,7 @@ aio_storage_context::submit_work() {
     while (to_submit > submitted) {
         auto nr = to_submit - submitted;
         auto iocbs = _submission_queue.data() + submitted;
-        auto r = io_submit(_io_context, nr, iocbs);
+        auto r = io_submit(_io_context, nr, iocbs);     // 将异步io任务递交给内核
         size_t nr_consumed;
         if (r == -1) {
             nr_consumed = handle_aio_error(iocbs[0], errno);
@@ -255,7 +255,7 @@ size_t aio_general_context::flush() {
     if (last != iocbs.get()) {
         auto nr = last - iocbs.get();
         last = iocbs.get();
-        auto r = io_submit(io_context, nr, iocbs.get());
+        auto r = io_submit(io_context, nr, iocbs.get());        // 将异步 io 任务递交给内核
         assert(r >= 0);
         return nr;
     }
@@ -393,7 +393,7 @@ bool reactor_backend_aio::await_events(int timeout, const sigset_t* active_sigma
             did_work = true;
             auto& event = batch[i];
             auto* desc = reinterpret_cast<kernel_completion*>(uintptr_t(event.data));
-            desc->complete_with(event.res);
+            desc->complete_with(event.res);     // 内核已经完成异步io, 执行 promise.set_value, 可以执行等待该 promise 的 future.then 任务了
         }
         // For the next iteration, don't use a timeout, since we may have waited already
         ts = {};
@@ -425,15 +425,15 @@ reactor_backend_aio::reactor_backend_aio(reactor* r)
 }
 
 bool reactor_backend_aio::reap_kernel_completions() {
-    bool did_work = await_events(0, nullptr);
+    bool did_work = await_events(0, nullptr);           // 查询内核是否完成异步 io 任务
     did_work |= _storage_context.reap_completions();
     return did_work;
 }
 
 bool reactor_backend_aio::kernel_submit_work() {
     _hrtimer_poll_completion.maybe_queue(_polling_io);
-    bool did_work = _polling_io.flush();
-    did_work |= _storage_context.submit_work();
+    bool did_work = _polling_io.flush();           // 将 iocbs 中的异步 io 任务递交给内核
+    did_work |= _storage_context.submit_work();    // 将 _pending_io 中的异步 io 任务递交给内核
     return did_work;
 }
 
@@ -497,8 +497,8 @@ future<> reactor_backend_aio::poll(pollable_fd_state& fd, int events) {
         *iocb = make_poll_iocb(fd.fd.get(), events);
         *desc = pollable_fd_state_completion{};
         set_user_data(*iocb, desc);
-        _polling_io.queue(iocb);
-        return pfd->get_completion_future(events);
+        _polling_io.queue(iocb);  // 将异步io任务添加到 iocbs 中, 在 reactor 的事件循环中执行 poller 的 poll-->kernel_submit_work 方法的时候，会将这些io任务递交给内核
+        return pfd->get_completion_future(events);      // 返回 future
     } catch (...) {
         return make_exception_future<>(std::current_exception());
     }

@@ -533,8 +533,10 @@ future<> sharded_parallel_for_each(unsigned nr_shards, on_each_shard_func on_eac
 template <typename Service>
 template <typename... Args>
 future<>
-sharded<Service>::start(Args&&... args) {
+sharded<Service>::start(Args&&... args)
+{
     _instances.resize(smp::count);
+
     return internal::sharded_parallel_for_each(_instances.size(),
         [this, args = std::make_tuple(std::forward<Args>(args)...)] (unsigned c) mutable {
             return smp::submit_to(c, [this, args] () mutable {

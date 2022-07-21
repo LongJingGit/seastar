@@ -46,7 +46,8 @@ namespace internal {
 
 unsigned smp_service_group_id(smp_service_group ssg);
 
-inline shard_id* this_shard_id_ptr() {
+inline shard_id* this_shard_id_ptr()
+{
     static thread_local shard_id g_this_shard_id;
     return &g_this_shard_id;
 }
@@ -153,24 +154,31 @@ void init_default_smp_service_group(shard_id cpu);
 
 smp_service_group_semaphore& get_smp_service_groups_semaphore(unsigned ssg_id, shard_id t);
 
-class smp_message_queue {
+class smp_message_queue
+{
     static constexpr size_t queue_length = 128;
     static constexpr size_t batch_size = 16;
     static constexpr size_t prefetch_cnt = 2;
     struct work_item;
-    struct lf_queue_remote {
+
+    struct lf_queue_remote
+    {
         reactor* remote;
     };
+
     using lf_queue_base = boost::lockfree::spsc_queue<work_item*,
                             boost::lockfree::capacity<queue_length>>;
+
     // use inheritence to control placement order
     struct lf_queue : lf_queue_remote, lf_queue_base {
         lf_queue(reactor* remote) : lf_queue_remote{remote} {}
         void maybe_wakeup();
         ~lf_queue();
     };
+
     lf_queue _pending;
     lf_queue _completed;
+
     struct alignas(seastar::cache_line_size) {
         size_t _sent = 0;
         size_t _compl = 0;
@@ -187,6 +195,7 @@ class smp_message_queue {
         size_t _received = 0;
         size_t _last_rcv_batch = 0;
     };
+
     struct work_item : public task {
         explicit work_item(smp_service_group ssg) : task(current_scheduling_group()), ssg(ssg) {}
         smp_service_group ssg;
@@ -195,6 +204,7 @@ class smp_message_queue {
         void process();
         virtual void complete() = 0;
     };
+
     template <typename Func>
     struct async_work_item : work_item {
         smp_message_queue& _queue;
@@ -233,7 +243,9 @@ class smp_message_queue {
         }
         future_type get_future() { return _promise.get_future(); }
     };
-    union tx_side {
+
+    union tx_side
+    {
         tx_side() {}
         ~tx_side() {}
         void init() { new (&a) aa; }
@@ -241,7 +253,9 @@ class smp_message_queue {
             std::deque<work_item*> pending_fifo;
         } a;
     } _tx;
+
     std::vector<work_item*> _completed_fifo;
+
 public:
     smp_message_queue(reactor* from, reactor* to);
     ~smp_message_queue();

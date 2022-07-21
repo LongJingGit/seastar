@@ -49,6 +49,7 @@ class packet;
 
 class pollable_fd_state;
 
+// boost::intrusive_ptr: 一种侵入式的引用计数指针，实际并不提供引用计数功能，而要求被存储的对象自己实现引用计数
 using pollable_fd_state_ptr = boost::intrusive_ptr<pollable_fd_state>;
 
 class pollable_fd_state {
@@ -181,7 +182,7 @@ protected:
     friend class writeable_eventfd;
     friend class aio_storage_context;
 private:
-    pollable_fd_state_ptr _s;
+    pollable_fd_state_ptr _s;       // pollable_fd_state 的智能指针
 };
 
 class writeable_eventfd;

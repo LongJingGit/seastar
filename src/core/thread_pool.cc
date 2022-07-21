@@ -26,33 +26,46 @@ namespace seastar {
 
 /* not yet implemented for OSv. TODO: do the notification like we do class smp. */
 #ifndef HAVE_OSV
-thread_pool::thread_pool(reactor* r, sstring name) : _reactor(r), _worker_thread([this, name] { work(name); }) {
-}
+thread_pool::thread_pool(reactor* r, sstring name)
+    : _reactor(r)
+    , _worker_thread([this, name] { work(name); })
+{}
 
-void thread_pool::work(sstring name) {
+void thread_pool::work(sstring name)
+{
     pthread_setname_np(pthread_self(), name.c_str());
     sigset_t mask;
     sigfillset(&mask);
     auto r = ::pthread_sigmask(SIG_BLOCK, &mask, NULL);
     throw_pthread_error(r);
+
     std::array<syscall_work_queue::work_item*, syscall_work_queue::queue_length> tmp_buf;
-    while (true) {
+
+    while (true)
+    {
         uint64_t count;
         auto r = ::read(inter_thread_wq._start_eventfd.get_read_fd(), &count, sizeof(count));
         assert(r == sizeof(count));
-        if (_stopped.load(std::memory_order_relaxed)) {
+        if (_stopped.load(std::memory_order_relaxed))
+        {
             break;
         }
+
         auto end = tmp_buf.data();
-        inter_thread_wq._pending.consume_all([&] (syscall_work_queue::work_item* wi) {
+        inter_thread_wq._pending.consume_all([&] (syscall_work_queue::work_item* wi)
+        {
             *end++ = wi;
         });
-        for (auto p = tmp_buf.data(); p != end; ++p) {
+
+        for (auto p = tmp_buf.data(); p != end; ++p)
+        {
             auto wi = *p;
             wi->process();
             inter_thread_wq._completed.push(wi);
         }
-        if (_main_thread_idle.load(std::memory_order_seq_cst)) {
+
+        if (_main_thread_idle.load(std::memory_order_seq_cst))
+        {
             uint64_t one = 1;
             ::write(_reactor->_notify_eventfd.get(), &one, 8);
         }

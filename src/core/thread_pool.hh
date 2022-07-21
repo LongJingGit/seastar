@@ -27,7 +27,8 @@ namespace seastar {
 
 class reactor;
 
-class thread_pool {
+class thread_pool
+{
     reactor* _reactor;
     uint64_t _aio_threaded_fallbacks = 0;
 #ifndef HAVE_OSV
@@ -35,14 +36,18 @@ class thread_pool {
     posix_thread _worker_thread;
     std::atomic<bool> _stopped = { false };
     std::atomic<bool> _main_thread_idle = { false };
+
 public:
     explicit thread_pool(reactor* r, sstring thread_name);
     ~thread_pool();
+
     template <typename T, typename Func>
-    future<T> submit(Func func) noexcept {
+    future<T> submit(Func func) noexcept
+    {
         ++_aio_threaded_fallbacks;
         return inter_thread_wq.submit<T>(std::move(func));
     }
+
     uint64_t operation_count() const { return _aio_threaded_fallbacks; }
 
     unsigned complete() { return inter_thread_wq.complete(); }
