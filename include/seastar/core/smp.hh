@@ -327,27 +327,40 @@ public:
     /// \return whatever \c func returns, as a future<> (if \c func does not return a future,
     ///         submit_to() will wrap it in a future<>).
     template <typename Func>
-    static futurize_t<std::result_of_t<Func()>> submit_to(unsigned t, smp_submit_to_options options, Func&& func) {
+    static futurize_t<std::result_of_t<Func()>> submit_to(unsigned t, smp_submit_to_options options, Func&& func)
+    {
         using ret_type = std::result_of_t<Func()>;
-        if (t == this_shard_id()) {
-            try {
-                if (!is_future<ret_type>::value) {
+
+        if (t == this_shard_id())
+        {
+            try
+            {
+                if (!is_future<ret_type>::value)
+                {
                     // Non-deferring function, so don't worry about func lifetime
                     return futurize<ret_type>::invoke(std::forward<Func>(func));
-                } else if (std::is_lvalue_reference<Func>::value) {
+                }
+                else if (std::is_lvalue_reference<Func>::value)
+                {
                     // func is an lvalue, so caller worries about its lifetime
                     return futurize<ret_type>::invoke(func);
-                } else {
+                }
+                else
+                {
                     // Deferring call on rvalue function, make sure to preserve it across call
                     auto w = std::make_unique<std::decay_t<Func>>(std::move(func));
                     auto ret = futurize<ret_type>::invoke(*w);
                     return ret.finally([w = std::move(w)] {});
                 }
-            } catch (...) {
+            }
+            catch (...)
+            {
                 // Consistently return a failed future rather than throwing, to simplify callers
                 return futurize<std::result_of_t<Func()>>::make_exception_future(std::current_exception());
             }
-        } else {
+        }
+        else
+        {
             return _qs[t][this_shard_id()].submit(t, options, std::forward<Func>(func));
         }
     }

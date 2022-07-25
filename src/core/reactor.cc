@@ -2764,12 +2764,12 @@ int reactor::run()
      * 然后由 reactor 在事件循环中将 poller 添加到 _pollers 里面
      */
 
-    poller smp_poller(std::make_unique<smp_pollfn>(*this));
+    poller smp_poller(std::make_unique<smp_pollfn>(*this));     // 处理其他 CPU 上的线程递交过来的任务的 poller
 
     poller reap_kernel_completions_poller(std::make_unique<reap_kernel_completions_pollfn>(*this));
     poller io_queue_submission_poller(std::make_unique<io_queue_submission_pollfn>(*this));// 把异步 io 保存到 _pending_io 中(不是所有类型的任务都会使用该 poller 将异步io添加到 _pend_io 中，比如网络socket)
-    poller kernel_submit_work_poller(std::make_unique<kernel_submit_work_pollfn>(*this));      // 将异步 io 递交给内核
-    poller final_real_kernel_completions_poller(std::make_unique<reap_kernel_completions_pollfn>(*this)); // 查询内核是否已完成异步 io
+    poller kernel_submit_work_poller(std::make_unique<kernel_submit_work_pollfn>(*this));      // 将异步任务递交给内核
+    poller final_real_kernel_completions_poller(std::make_unique<reap_kernel_completions_pollfn>(*this)); // 查询内核是否已完成异步任务
 
     poller batch_flush_poller(std::make_unique<batch_flush_pollfn>(*this));
     poller execution_stage_poller(std::make_unique<execution_stage_pollfn>());
@@ -3547,7 +3547,7 @@ std::vector<posix_thread> smp::_threads;
 std::vector<std::function<void ()>> smp::_thread_loops;
 compat::optional<boost::barrier> smp::_all_event_loops_done;
 std::vector<reactor*> smp::_reactors;           // 保存创建的所有 reactor. 0 号是主线程对应的 reactor
-std::unique_ptr<smp_message_queue*[], smp::qs_deleter> smp::_qs;
+std::unique_ptr<smp_message_queue*[], smp::qs_deleter> smp::_qs;        // 跨 CPU 线程之间进行通信的 spsc
 std::thread::id smp::_tmain;
 unsigned smp::count = 1;
 bool smp::_using_dpdk;

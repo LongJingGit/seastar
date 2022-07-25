@@ -447,9 +447,11 @@ posix_server_socket_impl::accept() {
     return _lfd.accept().then([this] (std::tuple<pollable_fd, socket_address> fd_sa) {
         auto& fd = std::get<0>(fd_sa);      // fd: 保存着在 accept() 接口中获取到的连接 socket
         auto& sa = std::get<1>(fd_sa);
+
         auto cth = [this, &sa] {
-            switch(_lba) {
-            case server_socket::load_balancing_algorithm::connection_distribution:
+            switch(_lba)        // 当接收到新的连接时，会利用不同的负载均衡算法将请求分配到不同的 CPU 去处理
+            {
+            case server_socket::load_balancing_algorithm::connection_distribution:      // RR
                 return _conntrack.get_handle();
             case server_socket::load_balancing_algorithm::port:
                 return _conntrack.get_handle(ntoh(sa.as_posix_sockaddr_in().sin_port) % smp::count);
@@ -458,17 +460,25 @@ posix_server_socket_impl::accept() {
             default: abort();
             }
         } ();
+
         auto cpu = cth.cpu();
-        if (cpu == this_shard_id()) {
-            std::unique_ptr<connected_socket_impl> csi(
-                    new posix_connected_socket_impl(sa.family(), _protocol, std::move(fd), std::move(cth), _allocator));
-            return make_ready_future<accept_result>(
-                    accept_result{connected_socket(std::move(csi)), sa});
-        } else {
+
+        // 如果是当前 cpu, 则直接执行
+        if (cpu == this_shard_id())
+        {
+            std::unique_ptr<connected_socket_impl> csi(new posix_connected_socket_impl(sa.family(), _protocol, std::move(fd), std::move(cth), _allocator));
+
+            return make_ready_future<accept_result>(accept_result{connected_socket(std::move(csi)), sa});
+        }
+        /* 将当前连接递交给另一个 cpu 上的线程去执行: 将当前连接添加到消息队列中, 另一个 CPU 上的线程在 reactor 事件循环 smp_pollfn::poll 中
+         * 会从消息队列中取出该任务，然后添加到自己的 reactor 任务队列中并执行 */
+        else
+        {
             // FIXME: future is discarded
             (void)smp::submit_to(cpu, [protocol = _protocol, ssa = _sa, fd = std::move(fd.get_file_desc()), sa, cth = std::move(cth), allocator = _allocator] () mutable {
                 posix_ap_server_socket_impl::move_connected_socket(protocol, ssa, pollable_fd(std::move(fd)), sa, std::move(cth), allocator);
             });
+
             return accept();
         }
     });
