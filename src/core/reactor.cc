@@ -4024,6 +4024,7 @@ void smp::configure(boost::program_options::variables_map configuration, reactor
         rc.num_io_queues.emplace(id, disk_config.num_io_queues(id));
     }
 
+    // 将整个虚拟地址空间按照CPU核数分成若干块，每个CPU使用自己的内存块进行内存的分配与释放，避免多核之间的内存同步
     auto resources = resource::allocate(rc);
     std::vector<resource::cpu> allocations = std::move(resources.cpus);
     if (thread_affinity)

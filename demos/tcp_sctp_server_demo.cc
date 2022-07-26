@@ -42,12 +42,16 @@ static std::string str_txbuf(tx_msg_size, 'X');
 static bool enable_tcp = false;
 static bool enable_sctp = false;
 
-class tcp_server {
+class tcp_server
+{
     std::vector<server_socket> _tcp_listeners;
     std::vector<server_socket> _sctp_listeners;
+
 public:
-    future<> listen(ipv4_addr addr) {
-        if (enable_tcp) {
+    future<> listen(ipv4_addr addr)
+    {
+        if (enable_tcp)
+        {
             listen_options lo;
             lo.proto = transport::TCP;
             lo.reuse_address = true;
@@ -55,22 +59,26 @@ public:
             do_accepts(_tcp_listeners);
         }
 
-        if (enable_sctp) {
+        if (enable_sctp)
+        {
             listen_options lo;
             lo.proto = transport::SCTP;
             lo.reuse_address = true;
             _sctp_listeners.push_back(seastar::listen(make_ipv4_address(addr), lo));
             do_accepts(_sctp_listeners);
         }
+
         return make_ready_future<>();
     }
 
     // FIXME: We should properly tear down the service here.
-    future<> stop() {
+    future<> stop()
+    {
         return make_ready_future<>();
     }
 
-    void do_accepts(std::vector<server_socket>& listeners) {
+    void do_accepts(std::vector<server_socket>& listeners)
+    {
         int which = listeners.size() - 1;
         // Accept in the background.
         (void)listeners[which].accept().then([this, &listeners] (accept_result ar) mutable {
@@ -79,9 +87,12 @@ public:
             auto conn = new connection(*this, std::move(fd), addr);
             (void)conn->process().then_wrapped([conn] (auto&& f) {
                 delete conn;
-                try {
+                try
+                {
                     f.get();
-                } catch (std::exception& ex) {
+                }
+                catch (std::exception& ex)
+                {
                     std::cout << "request error " << ex.what() << "\n";
                 }
             });
@@ -94,44 +105,64 @@ public:
             }
         });
     }
-    class connection {
+
+    class connection
+    {
         connected_socket _fd;
         input_stream<char> _read_buf;
         output_stream<char> _write_buf;
+
     public:
         connection(tcp_server& server, connected_socket&& fd, socket_address addr)
             : _fd(std::move(fd))
             , _read_buf(_fd.input())
-            , _write_buf(_fd.output()) {}
-        future<> process() {
+            , _write_buf(_fd.output())
+        {}
+
+        future<> process()
+        {
              return read();
         }
-        future<> read() {
-            if (_read_buf.eof()) {
+
+        future<> read()
+        {
+            if (_read_buf.eof())
+            {
                 return make_ready_future();
             }
+
             // Expect 4 bytes cmd from client
             size_t n = 4;
             return _read_buf.read_exactly(n).then([this] (temporary_buffer<char> buf) {
-                if (buf.size() == 0) {
+                if (buf.size() == 0)
+                {
                     return make_ready_future();
                 }
+
                 auto cmd = std::string(buf.get(), buf.size());
+
                 // pingpong test
-                if (cmd == str_ping) {
+                if (cmd == str_ping)
+                {
                     return _write_buf.write(str_pong).then([this] {
                         return _write_buf.flush();
                     }).then([this] {
                         return this->read();
                     });
                 // server tx test
-                } else if (cmd == str_txtx) {
+                }
+                else if (cmd == str_txtx)
+                {
                     return tx_test();
                 // server tx test
-                } else if (cmd == str_rxrx) {
+                }
+                else if (cmd == str_rxrx)
+                {
                     return rx_test();
                 // unknow test
-                } else {
+                }
+                else
+                {
                     return _write_buf.write(str_unknow).then([this] {
                         return _write_buf.flush();
                     }).then([] {
@@ -140,7 +171,9 @@ public:
                 }
             });
         }
-        future<> do_write(int end) {
+
+        future<> do_write(int end)
+        {
             if (end == 0) {
                 return make_ready_future<>();
             }
@@ -150,14 +183,18 @@ public:
                 return do_write(end - 1);
             });
         }
-        future<> tx_test() {
+
+        future<> tx_test()
+        {
             return do_write(tx_msg_nr).then([this] {
                 return _write_buf.close();
             }).then([] {
                 return make_ready_future<>();
             });
         }
-        future<> do_read() {
+
+        future<> do_read()
+        {
             return _read_buf.read_exactly(rx_msg_size).then([this] (temporary_buffer<char> buf) {
                 if (buf.size() == 0) {
                     return make_ready_future();
@@ -166,7 +203,9 @@ public:
                 }
             });
         }
-        future<> rx_test() {
+
+        future<> rx_test()
+        {
             return do_read().then([] {
                 return make_ready_future<>();
             });
@@ -176,22 +215,30 @@ public:
 
 namespace bpo = boost::program_options;
 
-int main(int ac, char** av) {
+#include <seastar/core/sleep.hh>
+
+int main(int ac, char** av)
+{
     app_template app;
     app.add_options()
         ("port", bpo::value<uint16_t>()->default_value(10000), "TCP server port")
         ("tcp", bpo::value<std::string>()->default_value("yes"), "tcp listen")
         ("sctp", bpo::value<std::string>()->default_value("no"), "sctp listen") ;
+
     return app.run_deprecated(ac, av, [&] {
         auto&& config = app.configuration();
         uint16_t port = config["port"].as<uint16_t>();
         enable_tcp = config["tcp"].as<std::string>() == "yes";
         enable_sctp = config["sctp"].as<std::string>() == "yes";
-        if (!enable_tcp && !enable_sctp) {
+
+        if (!enable_tcp && !enable_sctp)
+        {
             fprint(std::cerr, "Error: no protocols enabled. Use \"--tcp yes\" and/or \"--sctp yes\" to enable\n");
             return engine().exit(1);
         }
+
         auto server = new distributed<tcp_server>;
+
         (void)server->start().then([server = std::move(server), port] () mutable {
             engine().at_exit([server] {
                 return server->stop();

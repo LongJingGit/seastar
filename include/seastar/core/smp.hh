@@ -250,7 +250,7 @@ class smp_message_queue
         ~tx_side() {}
         void init() { new (&a) aa; }
         struct aa {
-            std::deque<work_item*> pending_fifo;
+            std::deque<work_item*> pending_fifo;       // 跨核线程进行通信的底层队列
         } a;
     } _tx;
 
