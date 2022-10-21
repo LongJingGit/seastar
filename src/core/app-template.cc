@@ -113,6 +113,7 @@ app_template::configuration() {
 int
 app_template::run(int ac, char ** av, std::function<future<int> ()>&& func) {
     return run_deprecated(ac, av, [func = std::move(func)] () mutable {
+        std::cout << __FILE__ << ":" << __LINE__<< std::endl;
         auto func_done = make_lw_shared<promise<>>();
         engine().at_exit([func_done] { return func_done->get_future(); });
         // No need to wait for this future.
@@ -128,6 +129,7 @@ app_template::run(int ac, char ** av, std::function<future<int> ()>&& func) {
 int
 app_template::run(int ac, char ** av, std::function<future<> ()>&& func) {
     return run(ac, av, [func = std::move(func)] {
+        std::cout << __FILE__ << ":" << __LINE__<< std::endl;
         return func().then([] () {
             return 0;
         });

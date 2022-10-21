@@ -277,7 +277,7 @@ struct future_state_base
 
     enum class state : uintptr_t {
          invalid = 0,
-         future = 1,
+         future = 1,            // future_state 的初始 state 为 future
          // the substate is intended to decouple the run-time prevention
          // for duplicative result extraction (calling e.g. then() twice
          // ends up in abandoned()) from the wrapped object's destruction
@@ -485,7 +485,7 @@ struct future_state :  public future_state_base, private internal::uninitialized
     void set(A&&... a)
     {
         assert(_u.st == state::future);
-        new (this) future_state(ready_future_marker(), std::forward<A>(a)...);
+        new (this) future_state(ready_future_marker(), std::forward<A>(a)...);      // 将 _u.st 设置为 state::result
     }
 
     future_state(exception_future_marker m, std::exception_ptr&& ex) noexcept : future_state_base(std::move(ex)) { }
@@ -555,7 +555,7 @@ template <typename... T>
 class continuation_base : public task
 {
 protected:
-    future_state<T...> _state;
+    future_state<T...> _state;      // 调用无参构造函数时, _state 被初始化成了 state::result
     using future_type = future<T...>;
     using promise_type = promise<T...>;
 
@@ -607,7 +607,7 @@ struct continuation final : continuation_base_with_promise<Promise, T...>
 
     virtual void run_and_dispose() noexcept override        // 在 reactor 的事件循环中，会调用该接口执行一个任务
     {
-        _func(this->_pr, std::move(this->_state));      // 真正执行 task 的函数
+        _func(this->_pr, std::move(this->_state));      // 真正执行 task 的函数. 注意，这里的参数 this->_pr 是新创建的 promise
         delete this;
     }
 
@@ -633,9 +633,12 @@ protected:
     // This points to the future_state that is currently being
     // used. See comment above the future_state struct definition for
     // details.
+    // 调用调用 promise_base(future_state_base* state) 构造函数，则 _state 指向的是派生类 promise::_local_state.
+    // 如果调用的是 promise_base(future_base* future, future_state_base* state) 构造函数，_state 会指向 future 的 _state.
+    // 如果是将 func 封装成异步任务然后需要由 promise 执行 set_value 才可以将 task 递交给 reactor 去执行, 会在 schedule(Pr&& pr, Func&& func) 方法中, 将 _state 指向 continuation_base::_state, continuation_base::_state 被初始化成了 state::future, 当 promise 执行 set_value 时, _state 会被设置为 state::result
     future_state_base* _state;
 
-    task* _task = nullptr;
+    task* _task = nullptr;  // 需要执行异步任务时，会将任务封装到 task 中，然后将 _task 指向封装好的 task, 在 make_ready 方法中会将该 task 递交给 reactor
 
     promise_base(const promise_base&) = delete;
     promise_base(future_state_base* state) noexcept : _state(state) {}
@@ -729,6 +732,7 @@ public:
         : promise_base(state)
     {}
 
+    // 通过 future 做参数来构造 promise 实例. 将 future 的 _state 和 promise 绑定到一起
     promise_base_with_type(future<T...>* future) noexcept
         : promise_base(future, &future->_state)
     {}
@@ -759,7 +763,7 @@ public:
     {
         if (auto *s = get_state())
         {
-            s->set(std::forward<A>(a)...);
+            s->set(std::forward<A>(a)...);     // 将 promise_base 的 state 设置成 state::result
             make_ready<urgent::no>();       // 将 _task 添加到 reactor 的任务队列中
         }
     }
@@ -776,7 +780,6 @@ private:
     template <typename Pr, typename Func>
     void schedule(Pr&& pr, Func&& func) noexcept
     {
-        // 将 func 封装到 continuation 里面, continuation 是 task 的派生类
         auto tws = new continuation<Pr, Func, T...>(std::move(pr), std::move(func));
         _state = &tws->_state;
         _task = tws;    // 将 continuation 绑定到 promise 的 _task 中, 当 promise 执行 set_value 时会将该 task 添加到 reactor 的任务队列中
@@ -804,14 +807,14 @@ private:
 template <typename... T>
 class promise : private internal::promise_base_with_type<T...>
 {
-    future_state<T...> _local_state;
+    future_state<T...> _local_state;    // 初始 state 为 state::future
 
 public:
     /// \brief Constructs an empty \c promise.
     ///
     /// Creates promise with no associated future yet (see get_future()).
     promise() noexcept
-        : internal::promise_base_with_type<T...>(&_local_state) {}
+        : internal::promise_base_with_type<T...>(&_local_state) {}      // 将 _local_state 作为构造函数入参, 调用基类构造函数
 
     /// \brief Moves a \c promise object.
     void move_it(promise&& x) noexcept;
@@ -1206,7 +1209,7 @@ struct warn_variadic_future<true> {
 template <typename... T>
 class SEASTAR_NODISCARD future : private internal::future_base, internal::warn_variadic_future<(sizeof...(T) > 1)>
 {
-    future_state<T...> _state;
+    future_state<T...> _state;      // _state 的初始值为 state::future
     static constexpr bool copy_noexcept = future_state<T...>::copy_noexcept;
 
 private:
@@ -1216,11 +1219,14 @@ private:
     // promise::set_value cannot possibly be called without a matching
     // future and so that promise doesn't need to store a
     // future_state.
+    // 如果调用的是该构造函数, _state 的初始值为 state::future, 并且因为调用的是基类 future_base 的无参构造函数，所以 future_base::_promise 会被初始化为 nullptr
     future(future_for_get_promise_marker m) noexcept {}
 
+    // 如果调用的是该构造函数，则 future 中的 _state, future_base->_promise->_state 都会被设置为 promise 的 _local_state
+    // 这种方式下，如果 promise 执行 set_value, 就可以通过判断 future 中的 _state 是否就绪，然后决定是否执行任务
     future(promise<T...>* pr) noexcept
-        : future_base(pr, &_state)
-        , _state(std::move(pr->_local_state))
+        : future_base(pr, &_state)      // 这里传入的是 _state 的指针
+        , _state(std::move(pr->_local_state))       // 将 _state 设置为 promise 的 _local_state
     {}
 
     template <typename... A>
@@ -1243,11 +1249,11 @@ private:
 
     internal::promise_base_with_type<T...> get_promise() noexcept
     {
-        assert(!_promise);
+        assert(!_promise);      // 注意: 调用该方法时, 基类 future_base 中的 _promise 成员变量在构造函数中被初始化成了 nullptr
         return internal::promise_base_with_type<T...>(this);
     }
 
-    // 返回的是 旧的 promise, 该 promise 的 _state 和 _future 变量都被值为空了
+    // 返回的是旧的 promise, 该 promise 的 _state 和 _future 变量都被置为空了
     internal::promise_base_with_type<T...>* detach_promise()
     {
         return static_cast<internal::promise_base_with_type<T...>*>(future_base::detach_promise());
@@ -1256,7 +1262,7 @@ private:
     template <typename Pr, typename Func>
     void schedule(Pr&& pr, Func&& func) noexcept
     {
-        // promise 已经完成或者 future 没有设置 promise. 比如 _network_stack_ready
+        // 如果 future 是否已经就绪或者 future 没有设置 promise(说明不需要等待 promise 执行 set_value, 比如_network_stack_ready), 表明该任务可以立即执行,将该任务封装到 task 中，然后递交给 reactor 去执行
         if (_state.available() || !_promise)
         {
             if (__builtin_expect(!_state.available() && !_promise, false))
@@ -1269,12 +1275,20 @@ private:
         }
         else
         {
-            // 需要等待 promise 完成。
+            // 在此之前, future 和 promise 是相互绑定的, future 中的 _state 和 future_base::_promise->_state 是绑定的
+
+            // 需要等待 promise 完成(即需要等待 promise 执行 set_value 之后才可以将 task 递交给 reactor)
             // 将任务封装成 continuation 挂到 promise 下的 _task, 等到 promise 的 set_value 方法被调用后，再将任务加入到任务队列中
             assert(_promise);
-            // 解除 promise 和 future 的绑定关系，然后为此 promise 分配了 future_state 和 task
+            // 调用 schedule 方法的是非空的 future->_promise, 但是 future->_promise->future 和 future->_promise->_state 为 nullptr
             detach_promise()->schedule(std::move(pr), std::move(func));
-            _state._u.st = future_state_base::state::invalid;       // 将 state 设置为 invalid
+            _state._u.st = future_state_base::state::invalid;       // 将旧的 future 中的 state 设置为 invalid
+
+            /**
+             * 至此，旧的 future 和旧的 promise 就已经解除绑定了. future->_promise 和 future->_promise->_future 都被置为 nullptr, future->_promise->_state 也被置为 nullptr.
+             * 旧的 promise 的 _state 指针会指向为 continuation 的 _state, 在旧的 promise 执行 set_value 时，会将 _state 设置为 state::result, 然后将这里封装的 promise->_task 递交给 reactor 去执行.
+             * 旧的 future 的 _state 不再使用.
+             */
         }
     }
 
@@ -1485,7 +1499,7 @@ public:
         return then_impl(std::move(func));
 #else
         return then_impl(noncopyable_function<Result (T&&...)>([func = std::forward<Func>(func)] (T&&... args) mutable {
-            return futurize_apply(func, std::forward_as_tuple(std::move(args)...));
+            return futurize_apply(func, std::forward_as_tuple(std::move(args)...));     // 注意，在这个调用里面，会单独执行 func, 然后创建一个已经就绪的 future 并返回
         }));
 #endif
     }
@@ -1496,16 +1510,22 @@ private:
     Result then_impl_nrvo(Func&& func) noexcept
     {
         using futurator = futurize<std::result_of_t<Func(T&&...)>>;
-        typename futurator::type fut(future_for_get_promise_marker{});      // 构造一个空的 future 对象 fut
+        typename futurator::type fut(future_for_get_promise_marker{});      // 创建新的 future 对象
 
         // If there is a std::bad_alloc in schedule() there is nothing that can be done about it, we cannot break future
         // chain by returning ready future while 'this' future is not ready. The noexcept will call std::terminate if
         // that happens.
         [&] () noexcept {
-            using pr_type = decltype(fut.get_promise());        // 为 future 绑定一个新的 promise
+            using pr_type = decltype(fut.get_promise());
             memory::disable_failure_guard dfg;
 
-            // 将 func 加入到任务队列中: 注意，这里传入的 promise 是新创建的
+            /**
+             * fut.get_promise() 会使用新创建的 future 然后构造新的 promise 对象，并且将新的 promise 对象中的 _state 指向 future 的 _state
+             *
+             * 匿名函数的入参 pr 是新创建的 promise, 第二个形参 state 是 continuation_base 中的 state
+             * 开始调用这里的 lambda 是在 continuation 的 run_and_dispose() 方法中
+             * 这里的 state 在 promise 的 set_value 中会被设置成 state::result
+             */
             schedule(fut.get_promise(), [func = std::forward<Func>(func)] (pr_type& pr, future_state<T...>&& state) mutable {
                 if (state.failed())
                 {
@@ -1515,15 +1535,17 @@ private:
                 {
                     try
                     {
-                        /* 在 then_impl_nrvo 接口中创建了新的 future 和 promise, 所以为了区分，把调用该接口的 future 和 promise 统一称为旧的 future 和 promise.
-                         * 当旧的 future 调用 then_impl_nrvo 的时候，在 schedule 中会将新创建的 promise 连同 func 封装到 continuation 中，
-                         * 然后将 continuation 绑定到旧的 promise 的 _task 上。
+                        /**
+                         * NOTE: 在 then_impl_nrvo 接口中创建了新的 future 和 promise, 所以为了区分，把调用该接口的 future 和 promise 统一称为旧的 future 和 promise.
                          *
-                         * 当旧的 promise 执行 set_value() 时，promise 上的 _task 会被添加到 reactor 的任务队列中并执行。当执行到 satisfy_with_result_of 的时候，
-                         * 传入的参数是新的 promise, 会执行新创建的 promise 的 set_value(). 然后等待该新创建的 promise 的值的也就是新创建的 future,
-                         * 也就是这里 then 调用返回的 future, 也就是说, then().then() 可以继续执行了 */
+                         * 当旧的 future 调用 then_impl_nrvo 的时候，在 schedule 中会将新创建的 promise 连同 func 封装到 task 中, 然后将 task 绑定到旧的 promise 的 _task 上,
+                         * 当旧的 promise 执行 set_value() 时, promise 上的 _task 会被添加到 reactor 的任务队列中并执行,
+                         * 当执行到 satisfy_with_result_of 的时候，传入的参数是新的 promise, 会执行新创建的 promise 的 set_value(),
+                         * 然后等待该新创建的 promise 的值的也就是新创建的 future, 也就是这里 then 调用返回的 future, 也就是说, then().then() 可以继续执行了.
+                         */
                         // satisfy_with_result_of 调用的是下面这个接口:
                         // void futurize<future<Args...>>::satisfy_with_result_of(internal::promise_base_with_type<Args...>&& pr, Func&& func)
+                        // 这里的 state 已经被设置成了 state::result
                         futurator::satisfy_with_result_of(std::move(pr), [&func, &state] {
                             return ::seastar::apply(std::forward<Func>(func), std::move(state).get_value());
                         });
@@ -1547,7 +1569,8 @@ private:
          * avaiable(): future 的值已经获取到了
          * need_preempt(): 当前是否有任务需要立即执行. 如果有其他任务需要立即执行，将 func 放入到任务队列, 否则直接执行 func. DEBUG 模式下一直返回 true.
          *
-         * 只有在线程执行了 engine().run() 进入 while 循环的时候才会执行 _start_promise.set_value, 之后 future 才可以获取到值
+         * 只有在 promise 执行了 set_value 之后, future 才可以获取到值
+         * 如果进程刚启动，执行了 engine().run() 进入 while 循环的时候才会执行 _start_promise.set_value, 之后 future 才可以获取到值
          */
         if (available() && !need_preempt())
         {
@@ -1557,14 +1580,16 @@ private:
             }
             else
             {
-                return futurator::apply(std::forward<Func>(func), get_available_state_ref().take_value());      // 执行 func
+                return futurator::apply(std::forward<Func>(func), get_available_state_ref().take_value());      // 立即执行 func
             }
         }
 
         /**
+         * 如果上面 future 的值没有获取到，说明当前无法立即执行该任务，需要将该任务作为一个异步任务交给 reactor 去执行，所以执行以下步骤:
+         *
          * 1. 创建一个新的 future 对象和新的 promise 对象
-         * 2. 将任务封装成 continuation 然后绑定到 promise 下的 _task
-         * 3. 当 promise 执行 set_value 时, _task 被加入到 reactor 的工作队列中
+         * 2. 将任务封装成 continuation 然后绑定到旧的 promise 下的 _task
+         * 3. 当旧的 promise 执行 set_value 时, _task 被加入到 reactor 的工作队列中
          * 4. 返回新的 future 对象，后续的 then 方法将在新返回的 future 对象上被调用
          */
         return then_impl_nrvo<Func, Result>(std::forward<Func>(func));
@@ -1676,7 +1701,7 @@ private:
         }
         else
         {
-            *detach_promise() = std::move(pr);
+            *detach_promise() = std::move(pr);      // 将 promise 绑定到 future 上
         }
     }
 
@@ -1916,7 +1941,7 @@ inline
 future<T...>
 promise<T...>::get_future() noexcept
 {
-    assert(!this->_future && this->_state && !this->_task);
+    assert(!this->_future && this->_state && !this->_task);    // 这里的 _state 是基类 promise_base 的成员变量, _state 在执行 reactor 类中的 _start_promise 的无参构造函数的时候会将基类 promise_base 的指针指向派生类 promise 的 _local_state 变量
     return future<T...>(this);          // 用 promise 构造 future 实例. 通过这种方法，将 promise 和 future 相互绑定
 }
 
@@ -2026,7 +2051,7 @@ typename futurize<void>::type futurize<void>::apply(Func&& func, std::tuple<Func
     try
     {
         ::seastar::apply(std::forward<Func>(func), std::move(args));
-        return make_ready_future<>();
+        return make_ready_future<>();       // 返回就绪的 future
     }
     catch (...)
     {
@@ -2074,6 +2099,39 @@ template<typename Func>
 SEASTAR_CONCEPT( requires ::seastar::CanInvoke<Func> )
 void futurize<future<Args...>>::satisfy_with_result_of(internal::promise_base_with_type<Args...>&& pr, Func&& func)
 {
+#if 0
+    auto func_2 = [this] {
+        return seastar::metrics::configure(this->configuration()).then([this] {
+            // set scollectd use the metrics configuration, so the later
+            // need to be set first
+            scollectd::configure( this->configuration());
+        });
+    };
+
+    auto func_1 = noncopyable_function<Result (T&&...)>([func_2 = std::forward<Func>(func_2)] (T&&... args) mutable
+    {
+        // 单独执行 func_2(), 然后创建一个就绪的 future 并返回
+        // func_2(); return ready_future();
+        return futurize_apply(func_2, std::forward_as_tuple(std::move(args)...));
+    };
+
+    auto func = [&func, &state] { return ::seastar::apply(std::forward<Func>(func_1), std::move(state).get_value());    // 实际上执行的是 return func_1()
+
+    // func() 返回的 func_1() 返回的新创建的已经就绪的 future, 通过调用 forward_to(), 将 promise_base 的 _state 设置为 state::result
+    // func().forward_to(std::move(pr));
+#endif
+
+    /**
+     * 以下链式调用的执行过程分析:
+     * 1. func() 内部是多个 lambda 表达式的递归调用，内部调用结果如上.
+     * 2. func() 返回的 future 是在 func_1() 调用中已经就绪的 future
+     * 3. 使用 func() 返回的已经就绪的 future (future->_state == state::result) 来调用 forward_to, forward_to 内部会执行两个步骤:
+     *   3.1 用 future->_state 初始化 pr->_state. 也就是说 pr 的 _state 也被设置成了 state::result. 然后这个已经就绪的 future 就没有其他作用了
+     *   3.2 在 make_ready 接口中将 promise 上绑定的 _task 递交给 reactor 去执行.
+     *
+     * 这里 promise 中的 _task 是在什么时候被赋值的?
+     *   作为 satisfy_with_result_of 参数的 pr 在创建之初就已经和新创建的 future 绑定在一起了，在第一次 then 调用之后会返回新创建的 future, 然后在第二次 then 调用中将对应的任务封装成 task, 然后绑定到 future->_promise->_task 上
+     */
     func().forward_to(std::move(pr));
 }
 
