@@ -114,6 +114,8 @@ public:
 
 /// Runs a function on a remote shard from an alien thread where engine() is not available.
 ///
+/// 当前的 engine() 如果不空闲，在其他远程空闲的 reactor 上运行 func. shard 表示远程的 cpu core id
+///
 /// \param shard designates the shard to run the function on
 /// \param func a callable to run on shard \c t.  If \c func is a temporary object,
 ///          its lifetime will be extended by moving it.  If @func is a reference,
@@ -158,6 +160,7 @@ template <typename Func> using return_type_t = typename return_type_of<Func>::ty
 ///          the caller must guarantee that it will survive the call.
 /// \return whatever \c func returns, as a \c std::future<>
 /// \note the caller must keep the returned future alive until \c func returns
+/// alien::submit_to 接口只有在 alien_test 中使用过
 template<typename Func, typename T = internal::return_type_t<Func>>
 std::future<T> submit_to(unsigned shard, Func func) {
     std::promise<T> pr;

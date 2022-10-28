@@ -45,12 +45,12 @@ struct configuration {
     optional<size_t> reserve_memory;  // if total_memory not specified
     optional<size_t> cpus;
     optional<cpuset> cpu_set;
-    std::unordered_map<dev_t, unsigned> num_io_queues;
+    std::unordered_map<dev_t, unsigned> num_io_queues;      // dev_t: NUMA node index
 };
 
 struct memory {
     size_t bytes;
-    unsigned nodeid;
+    unsigned nodeid;        // NUMA node index
 
 };
 
@@ -65,13 +65,13 @@ struct io_queue_topology {
 };
 
 struct cpu {
-    unsigned cpu_id;
+    unsigned cpu_id; // 实际的 cpu index. 将超线程计算在内. 比如 1 个 NUMA node 有两个 cpu, 每个 cpu 开启了超线程, 所以可以认为共有 4 个 cpu core, 这里的 cpu_id 就为 0-3
     std::vector<memory> mem;
 };
 
 struct resources {
     std::vector<cpu> cpus;
-    std::unordered_map<dev_t, io_queue_topology> ioq_topology;
+    std::unordered_map<dev_t, io_queue_topology> ioq_topology;      // dev_t: NUMA node index. 可以通过 lscpu 获取 NUMA NODE 信息
 };
 
 resources allocate(configuration c);

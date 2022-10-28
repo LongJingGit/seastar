@@ -2178,6 +2178,8 @@ void reactor::run_tasks(task_queue& tq)
         ++_global_tasks_processed;
 
         // check at end of loop, to allow at least one task to run
+        // 如果当前 task_queue 中 task 的数量太多，导致当前 reactor 一直在执行当前 task_queue 中的 task, 其他 task_queue 中的 task 没法执行.
+        // 所以这里增加了判断, 如果当前 task_queue 中 task 数量太多，就执行抢占，不再执行当前 task_queue 中的 task, 将当前 task_queue 添加到 _active_task_queues, 然后执行下一个 task_queue
         if (need_preempt())
         {
             if (tasks.size() <= _max_task_backlog)
@@ -2199,8 +2201,8 @@ void reactor::run_tasks(task_queue& tq)
 void reactor::shuffle(task*& t, task_queue& q) {
     static thread_local std::mt19937 gen = std::mt19937(std::default_random_engine()());
     std::uniform_int_distribution<size_t> tasks_dist{0, q._q.size() - 1};
-    auto& to_swap = q._q[tasks_dist(gen)];
-    std::swap(to_swap, t);
+    auto& to_swap = q._q[tasks_dist(gen)];      // task_dist(gen) 产生一个在 {0, q._q.size() - 1} 之间的一个随机数
+    std::swap(to_swap, t);      // 这里交换的是 task_queue 中两个 task 的位置
 }
 #endif
 
@@ -2671,18 +2673,19 @@ reactor::run_some_tasks()
     do {
         auto t_run_started = t_run_completed;
         insert_activating_task_queues();        // 将 task_queue 从 _activating_task_queues 移动到 _active_task_queues 中
-        auto tq = _active_task_queues.front();
+        auto tq = _active_task_queues.front();  // 从 list 中依次读取每一个 task_queue
         _active_task_queues.pop_front();
         sched_print("running tq {} {}", (void*)tq, tq->_name);
         tq->_current = true;
         _last_vruntime = std::max(tq->_vruntime, _last_vruntime);
-        run_tasks(*tq);             // 执行任务
+        run_tasks(*tq);             // 依次运行 task_queue 中的每一个 task
         tq->_current = false;
         t_run_completed = std::chrono::steady_clock::now();
         auto delta = t_run_completed - t_run_started;
         account_runtime(*tq, delta);
         sched_print("run complete ({} {}); time consumed {} usec; final vruntime {} empty {}",
                 (void*)tq, tq->_name, delta / 1us, tq->_vruntime, tq->_q.empty());
+        // 这里重新判断当前 task_queue 是否为空, 因为在 run_task() 中可能执行了抢占，导致 task_queue 中的 task 没有执行完, 将该 task_queue 添加到 _active_task_queues 中，在下一次 while 循环中继续执行.
         if (!tq->_q.empty()) {
             insert_active_task_queue(tq);
         } else {
@@ -2764,7 +2767,7 @@ int reactor::run()
      * 然后由 reactor 在事件循环中将 poller 添加到 _pollers 里面
      */
 
-    poller smp_poller(std::make_unique<smp_pollfn>(*this));     // 处理其他 CPU 上的线程递交过来的任务的 poller
+    poller smp_poller(std::make_unique<smp_pollfn>(*this));     // 处理线程之间相互递交异步任务的 poller(当前 reactor 将异步任务递交给其他 reactor, 当前 reactor 接收从其他 reactor 递交过来的异步任务)
 
     poller reap_kernel_completions_poller(std::make_unique<reap_kernel_completions_pollfn>(*this));
     poller io_queue_submission_poller(std::make_unique<io_queue_submission_pollfn>(*this));// 把异步 io 保存到 _pending_io 中(不是所有类型的任务都会使用该 poller 将异步io添加到 _pend_io 中，比如网络socket)
@@ -3185,12 +3188,12 @@ void smp_message_queue::stop() {
 void smp_message_queue::move_pending() {
     auto begin = _tx.a.pending_fifo.cbegin();
     auto end = _tx.a.pending_fifo.cend();
-    end = _pending.push(begin, end);
+    end = _pending.push(begin, end);    // 把 pending_fifo 中的所有异步任务全部添加到 _pending 中
     if (begin == end) {
         return;
     }
     auto nr = end - begin;
-    _pending.maybe_wakeup();
+    _pending.maybe_wakeup();        // 通过 event_fd 唤醒对端 reactor
     _tx.a.pending_fifo.erase(begin, end);
     _current_queue_length += nr;
     _last_snt_batch = nr;
@@ -3204,25 +3207,25 @@ bool smp_message_queue::pure_poll_tx() const {
 }
 
 void smp_message_queue::submit_item(shard_id t, smp_timeout_clock::time_point timeout, std::unique_ptr<smp_message_queue::work_item> item) {
-  // matching signal() in process_completions()
-  auto ssg_id = internal::smp_service_group_id(item->ssg);
-  auto& sem = get_smp_service_groups_semaphore(ssg_id, t);
-  // Future indirectly forwarded to `item`.
-  (void)get_units(sem, 1, timeout).then_wrapped([this, item = std::move(item)] (future<smp_service_group_semaphore_units> units_fut) mutable {
+    // matching signal() in process_completions()
+    auto ssg_id = internal::smp_service_group_id(item->ssg);
+    auto& sem = get_smp_service_groups_semaphore(ssg_id, t);
+    // Future indirectly forwarded to `item`.
+    (void)get_units(sem, 1, timeout).then_wrapped([this, item = std::move(item)] (future<smp_service_group_semaphore_units> units_fut) mutable {
     if (units_fut.failed()) {
         item->fail_with(units_fut.get_exception());
         ++_compl;
         ++_last_cmpl_batch;
         return;
     }
-    _tx.a.pending_fifo.push_back(item.get());
+    _tx.a.pending_fifo.push_back(item.get());       // 需要递交给其他 reactor 的异步任务会先被添加到 pending_fifo 中
     // no exceptions from this point
     item.release();
     units_fut.get0().release();
     if (_tx.a.pending_fifo.size() >= batch_size) {
         move_pending();
     }
-  });
+    });
 }
 
 void smp_message_queue::respond(work_item* item) {
@@ -3240,7 +3243,7 @@ void smp_message_queue::flush_response_batch() {
         if (begin == end) {
             return;
         }
-        _completed.maybe_wakeup();
+        _completed.maybe_wakeup();     // 给本端 reactor 发送 wakeup 的意义在哪里？
         _completed_fifo.erase(begin, end);
     }
 }
@@ -3304,7 +3307,7 @@ size_t smp_message_queue::process_queue(lf_queue& q, Func process) {
 
 size_t smp_message_queue::process_completions(shard_id t) {
     auto nr = process_queue<prefetch_cnt*2>(_completed, [t] (work_item* wi) {
-        wi->complete();
+        wi->complete();     // 异步任务已经完成，执行 set_value
         auto ssg_id = smp_service_group_id(wi->ssg);
         get_smp_service_groups_semaphore(ssg_id, t).signal();
         delete wi;
@@ -3547,18 +3550,46 @@ std::vector<posix_thread> smp::_threads;
 std::vector<std::function<void ()>> smp::_thread_loops;
 compat::optional<boost::barrier> smp::_all_event_loops_done;
 std::vector<reactor*> smp::_reactors;           // 保存创建的所有 reactor. 0 号是主线程对应的 reactor
-std::unique_ptr<smp_message_queue*[], smp::qs_deleter> smp::_qs;        // 跨 CPU 线程之间进行通信的 spsc
-std::thread::id smp::_tmain;
+
+/**
+ * reactor 之间相互递交异步任务的 queue. 每一对 reactor 之间就有两个 queue, 分别对应收发异步任务.
+ *
+ * 比如，如果有 4 个 reactor, 分别对应着 0 1 2 3.
+ *
+ * 在 smp::configure 中会创建 4*4 个 queue, 但是在 start 的时候只会启动其中的 12 个，其中 [0][0] [1][1] [2][2] [3][3] 不会启动.
+ *
+ * 其中, 异步任务的发送和接收序列如下:
+ *
+ * reactor[1]  -->  _qs[0][1]  -->  reactor[0]
+ * reactor[2]  -->  _qs[0][2]  -->  reactor[0]
+ * reactor[3]  -->  _qs[0][3]  -->  reactor[0]
+ *
+ * reactor[0]  -->  _qs[1][0]  -->  reactor[1]
+ * reactor[2]  -->  _qs[1][2]  -->  reactor[1]
+ * reactor[3]  -->  _qs[1][3]  -->  reactor[1]
+ *
+ * reactor[0]  -->  _qs[2][0]  -->  reactor[2]
+ * reactor[1]  -->  _qs[2][1]  -->  reactor[2]
+ * reactor[3]  -->  _qs[2][3]  -->  reactor[2]
+ *
+ * reactor[0]  -->  _qs[3][0]  -->  reactor[3]
+ * reactor[1]  -->  _qs[3][1]  -->  reactor[3]
+ * reactor[2]  -->  _qs[3][2]  -->  reactor[3]
+ */
+std::unique_ptr<smp_message_queue*[], smp::qs_deleter> smp::_qs;
+
+std::thread::id smp::_tmain;        // 主线程的线程 id
 unsigned smp::count = 1;
 bool smp::_using_dpdk;
 
+// 该接口会被每个 reactor 调用
 void smp::start_all_queues()
 {
     for (unsigned c = 0; c < count; c++)
     {
         if (c != this_shard_id())
         {
-            _qs[c][this_shard_id()].start(c);
+            _qs[c][this_shard_id()].start(c); // 这里不会启动 _qs[0][0] _qs[1][1] _qs[2][2] _qs[3][3], 因为不需要将一个任务从当前 reactor 递交给当前 reactor
         }
     }
 
@@ -3612,7 +3643,7 @@ void smp::allocate_reactor(unsigned id, reactor_backend_selector rbs, reactor_co
     int r = posix_memalign(&buf, cache_line_size, sizeof(reactor));
     assert(r == 0);
     local_engine = reinterpret_cast<reactor*>(buf);
-    *internal::this_shard_id_ptr() = id;
+    *internal::this_shard_id_ptr() = id;            // 保存当前线程所属的 cpu core id, 该变量是 thread_local
     new (buf) reactor(id, std::move(rbs), cfg);
     reactor_holder.reset(local_engine);
 }
@@ -3928,6 +3959,7 @@ void smp::configure(boost::program_options::variables_map configuration, reactor
             // CPUs that are not available are those pinned by
             // --cpuset but not by cgroups, if mounted.
             std::set<unsigned int> not_available_cpus;
+            // std::set_diference: 查找在集合 cpu_set 中出现但是没有在集合 cgroup_cpu_set 中出现的元素
             std::set_difference(cpu_set.begin(), cpu_set.end(),
                                 cgroup_cpu_set->begin(), cgroup_cpu_set->end(),
                                 std::inserter(not_available_cpus, not_available_cpus.end()));
@@ -4024,12 +4056,12 @@ void smp::configure(boost::program_options::variables_map configuration, reactor
         rc.num_io_queues.emplace(id, disk_config.num_io_queues(id));
     }
 
-    // 将整个虚拟地址空间按照CPU核数分成若干块，每个CPU使用自己的内存块进行内存的分配与释放，避免多核之间的内存同步
+    // 调用 hwloc 的接口，获取 cpu 拓扑信息，然后将操作系统的内存空间按照 CPU 核数分为相同的若干份
     auto resources = resource::allocate(rc);
     std::vector<resource::cpu> allocations = std::move(resources.cpus);
     if (thread_affinity)
     {
-        smp::pin(allocations[0].cpu_id);
+        smp::pin(allocations[0].cpu_id);        // 当前主线程绑定到 cpu core 0
     }
 
     memory::configure(allocations[0].mem, mbind, hugepages_path);
@@ -4063,7 +4095,7 @@ void smp::configure(boost::program_options::variables_map configuration, reactor
 
     auto ioq_topology = std::move(resources.ioq_topology);
 
-    std::unordered_map<dev_t, std::vector<io_queue*>> all_io_queues;
+    std::unordered_map<dev_t, std::vector<io_queue*>> all_io_queues; // dev_t: NUMA node index, std::vector<io_queue*>: 每个 NUMA node 上的每个 cpu core 对应着一个 io queue
 
     for (auto& id : disk_config.device_ids())
     {
@@ -4071,6 +4103,7 @@ void smp::configure(boost::program_options::variables_map configuration, reactor
         all_io_queues.emplace(id, io_info.coordinators.size());
     }
 
+    // shard: cpu core index,       id: NUMA node index
     auto alloc_io_queue = [&ioq_topology, &all_io_queues, &disk_config] (unsigned shard, dev_t id) {
         auto io_info = ioq_topology.at(id);
         auto cid = io_info.shard_to_coordinator[shard];
@@ -4080,7 +4113,7 @@ void smp::configure(boost::program_options::variables_map configuration, reactor
         if (shard == cid)
         {
             struct io_queue::config cfg = disk_config.generate_config(id);
-            cfg.coordinator = cid;
+            cfg.coordinator = cid;    // cid 是 cpu core id
             cfg.io_topology = io_info.shard_to_coordinator;
             assert(vec_idx < all_io_queues[id].size());
             assert(!all_io_queues[id][vec_idx]);
@@ -4088,6 +4121,7 @@ void smp::configure(boost::program_options::variables_map configuration, reactor
         }
     };
 
+    // shard_id: cpu core index,       dev_id: NUMA node index
     auto assign_io_queue = [&ioq_topology, &all_io_queues] (shard_id shard_id, dev_t dev_id) {
         auto io_info = ioq_topology.at(dev_id);
         auto cid = io_info.shard_to_coordinator[shard_id];
@@ -4095,6 +4129,7 @@ void smp::configure(boost::program_options::variables_map configuration, reactor
 
         if (all_io_queues[dev_id][queue_idx]->coordinator() == shard_id)
         {
+            // 因为 all_io_queues 是局部变量，所以这里将 all_io_queues 添加到 my_io_queues 中, 让 my_io_queues 来管理这些 io queue 的生命周期
             engine().my_io_queues.emplace_back(all_io_queues[dev_id][queue_idx]);
         }
         engine()._io_queues.emplace(dev_id, all_io_queues[dev_id][queue_idx]);
@@ -4195,16 +4230,30 @@ void smp::configure(boost::program_options::variables_map configuration, reactor
 
     reactors_registered.wait();
 
+    // _qs 是一个指向二维数组的指针
     smp::_qs = decltype(smp::_qs){new smp_message_queue* [smp::count], qs_deleter{}};
 
+    // NOTE: 创建了 smp::count * smp::count 个消息队列
     for(unsigned i = 0; i < smp::count; i++)
     {
         smp::_qs[i] = reinterpret_cast<smp_message_queue*>(operator new[] (sizeof(smp_message_queue) * smp::count));
         for (unsigned j = 0; j < smp::count; ++j)
         {
+            // 注意: smp_message_queue 在初始化的时候指定了对端的 reactor 的地址以及本端 reactor 的地址
             new (&smp::_qs[i][j]) smp_message_queue(_reactors[j], _reactors[i]);
         }
     }
+
+    /**
+     * FIXME: 这里 smp::_qs 和 alien::smp::_qs 的区别是什么，作用是什么？
+     *
+     * 猜测：
+     * 1. smp::_qs 是用来在各个 reactor 之间相互传递异步任务的. 比如 reactor-1 将异步任务 FuncA 通过 _qs[2][1] 递交给 reactor-2, reactor-2 将异步任务 FuncB 通过 _qs[1][2] 递交给 reactor-1. 这些 reactor 之间进行消息传递需要确认异步任务是否完成(比如可能本 reactor 在等待递交给其他 reactor 的异步任务完成之后才会执行 promise 的 set_value 或者返回已经就绪的 future)
+     * 2. alien::smp::_qs 也是用来在各个 reactor 之间进行消息传递的，但是通过这个消息队列传递的消息，本 reactor 是不用确认异步任务是否被执行结束, 因为本 reactor 将异步任务递交给其他 reactor 之后，会立即返回已经就绪的 future
+     *
+     * 也有可能是因为同一个 NUMA node 上的不同 cpu core 相互递交任务使用 smp::_qs, 不同 NUMA node 上的 cpu core 递交任务使用 alien::smp::_qs.
+     *
+     */
 
     alien::smp::_qs = alien::smp::create_qs(_reactors);
     smp_queues_constructed.wait();
@@ -4228,12 +4277,13 @@ bool smp::poll_queues()
         if (this_shard_id() != i)
         {
             auto& rxq = _qs[this_shard_id()][i];
-            rxq.flush_response_batch();
+            rxq.flush_response_batch();                 // 将已经完成的异步任务保存到 _completed 中
             got += rxq.has_unflushed_responses();
-            got += rxq.process_incoming();
+            got += rxq.process_incoming();              // 将其他 reactor 递交过来的 task 添加到本 reactor 的任务队列中
+
             auto& txq = _qs[i][this_shard_id()];
-            txq.flush_request_batch();
-            got += txq.process_completions(i);
+            txq.flush_request_batch();                  // 填充需要发送给对端 reactor 的任务队列 _pending，并通过 event_fd 唤醒对端 reactor
+            got += txq.process_completions(i);          // 执行已经完成的异步任务的 promise 的 set_value
         }
     }
 

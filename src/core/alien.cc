@@ -121,12 +121,13 @@ void smp::qs_deleter::operator()(alien::message_queue* qs) const {
     ::operator delete[](qs);
 }
 
+// 如果某个 reactor 不空闲，将 func 递交给其他空闲的 reactor 去执行。每个 reactor 都有一个该类型的消息队列，用于接收其他 reactor 递交过来的任务
 smp::qs smp::_qs;
 
 smp::qs smp::create_qs(const std::vector<reactor*>& reactors) {
     auto queues = reinterpret_cast<alien::message_queue*>(operator new[] (sizeof(alien::message_queue) * reactors.size()));
     for (unsigned i = 0; i < reactors.size(); i++) {
-        new (&queues[i]) alien::message_queue(reactors[i]);
+        new (&queues[i]) alien::message_queue(reactors[i]);     // 注意 message_queue 的初始化, reactor[i] 表示的对端 reactor 的地址
     }
     return qs{queues, smp::qs_deleter{static_cast<unsigned>(reactors.size())}};
 }

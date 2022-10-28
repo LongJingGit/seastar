@@ -272,8 +272,9 @@ private:
     // Not all reactors have IO queues. If the number of IO queues is less than the number of shards,
     // some reactors will talk to foreign io_queues. If this reactor holds a valid IO queue, it will
     // be stored here.
+    // 这里的 io 主要是在 file 操作中使用
     std::vector<std::unique_ptr<io_queue>> my_io_queues;
-    std::unordered_map<dev_t, io_queue*> _io_queues;
+    std::unordered_map<dev_t, io_queue*> _io_queues;        // dev_t: NUMA node index
     friend io_queue;
 
     std::vector<noncopyable_function<future<> ()>> _exit_funcs;
@@ -331,12 +332,12 @@ private:
         void register_stats();
     };
 
-    circular_buffer<internal::io_request> _pending_io;
-    boost::container::static_vector<std::unique_ptr<task_queue>, max_scheduling_groups()> _task_queues;
+    circular_buffer<internal::io_request> _pending_io;      // 该 io 用来保存 reactor 需要递交给内核的异步任务
+    boost::container::static_vector<std::unique_ptr<task_queue>, max_scheduling_groups()> _task_queues; // 是一个 vector, 保存着最多 max_scheduling_groups() 个 task_queue, 可以直接用 task::scheduling_group::_id 来索引对应的 task_queue. 一旦某个 task_queue 中被加入了 task, 该 task_queue 就会被添加到 _activating_task_queues 链表中.
     internal::scheduling_group_specific_thread_local_data _scheduling_group_specific_data;
     int64_t _last_vruntime = 0;
-    task_queue_list _active_task_queues;
-    task_queue_list _activating_task_queues;
+    task_queue_list _active_task_queues;    // 是一个 task_queue 的链表. 在 reactor::run_some_tasks() 接口中会将 _activating_task_queues 中的 task_queue 加入到 _active_task_queues, 然后从 _active_task_queues 中依次取出每个 task_queue, 然后再从 task_queue 中依次取出每一个 task 并执行.
+    task_queue_list _activating_task_queues;        // 保存着多个非空的 task_queue 的链表.
     task_queue* _at_destroy_tasks;
     sched_clock::duration _task_quota;
     /// Handler that will be called when there is no task to execute on cpu.
@@ -598,19 +599,25 @@ public:
     void shuffle(task*&, task_queue&);
 #endif
 
+    // 该接口主要用于向 reactor 递交 task
     void add_task(task* t) noexcept
     {
         auto sg = t->group();
-        auto* q = _task_queues[sg._id].get();
-        bool was_empty = q->_q.empty();
-        q->_q.push_back(std::move(t));      // 将 task 放入到 _task_queues 中
+        auto* q = _task_queues[sg._id].get();   // 得到指定的 task_queue. 注意区分 _task_queues 和 task_queue: _task_queues 是一个 static_vector, 里面保存着多个 task_queue, 每个 task_queue 中使用环形数组保存着多个 task
+        bool was_empty = q->_q.empty();     // 判断当前 task_queue 是否为空
+        q->_q.push_back(std::move(t));      // 将 task 放入到 task_queue 中
 #ifdef SEASTAR_SHUFFLE_TASK_QUEUE
+        // 注意: q->_q.back() 指向 task_queue 中最后一个 task 的指针. *q 是 task_queue.
+        // shuffle() 函数内部会将刚才添加到 task_queue 中的 task 的位置在环形数组中调换到一个随机位置
+        // 疑问:
+        // 1. 为什么 shuffle() 函数的调用会导致 task_queue 中的其他变量发生变化??
+        // 2. 为什么需要调动 task_queue 中 task 的位置??
         shuffle(q->_q.back(), *q);
 #endif
         if (was_empty)
         {
-            // 增加新任务到 _task_queues 中时，如果 _task_queues 为空，
-            // 则将 task_queue 加入到 _activating_task_queues 中(每个线程在 run_some_tasks 中对该任务队列进行处理)
+            // 在 task_queue 第一次添加 task 的时候，会把 task_queue 的指针加入到 _activating_task_queues 中, reactor 会在 run_some_tasks 中通过判断 _activating_task_queues 是否为空来决定是否有需要执行的 task
+            // 因为向 _activating_task_queues 中加入的是 task_queue 的指针，所以在 add_task() 中仍然可以向 task_queue 中添加 task
             activate(*q);
         }
     }

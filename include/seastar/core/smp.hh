@@ -172,12 +172,20 @@ class smp_message_queue
     // use inheritence to control placement order
     struct lf_queue : lf_queue_remote, lf_queue_base {
         lf_queue(reactor* remote) : lf_queue_remote{remote} {}
-        void maybe_wakeup();
+        void maybe_wakeup();        // 通过 event_fd 唤醒对端 reactor
         ~lf_queue();
     };
 
-    lf_queue _pending;
-    lf_queue _completed;
+    /**
+     * _pending 的作用:
+     * 1. 保存本端 reactor 要发给对端 reactor 的异步任务
+     * 2. 保存本端 reactor 从对端 reactor 接收的异步任务
+     *
+     * _completed 的作用:
+     * 1. 保存本端 reactor 已经执行完毕的异步任务. 异步任务完成之后，就可以执行 promise 的 set_value
+     */
+    lf_queue _pending;      // 构造该实例时，传入的 reactor 是对端的 reactor
+    lf_queue _completed;    // 构造该实例时传入的 reactor 是本端的 reactor
 
     struct alignas(seastar::cache_line_size) {
         size_t _sent = 0;
@@ -228,7 +236,7 @@ class smp_message_queue
                 } else {
                     _result = f.get();
                 }
-                _queue.respond(this);
+                _queue.respond(this);       // 异步任务完成，填充 _completed_fifo
             });
             // We don't delete the task here as the creator of the work item will
             // delete it on the origin shard.
@@ -250,11 +258,13 @@ class smp_message_queue
         ~tx_side() {}
         void init() { new (&a) aa; }
         struct aa {
-            std::deque<work_item*> pending_fifo;       // 跨核线程进行通信的底层队列
+            // 1. smp_message_queue::submit_item 会把需要递交给其他 reactor 的异步任务保存到 pending_fifo 中
+            // 2. smp::poll_queues 会把保存在 pending_fifo 中的异步任务添加到队列 _pending 中
+            std::deque<work_item*> pending_fifo;
         } a;
     } _tx;
 
-    std::vector<work_item*> _completed_fifo;
+    std::vector<work_item*> _completed_fifo; // 保存已经完成的异步任务，在 async_work_item::run_and_dispose 填充
 
 public:
     smp_message_queue(reactor* from, reactor* to);
@@ -264,7 +274,7 @@ public:
         memory::disable_failure_guard dfg;
         auto wi = std::make_unique<async_work_item<Func>>(*this, options.service_group, std::forward<Func>(func));
         auto fut = wi->get_future();
-        submit_item(t, options.timeout, std::move(wi));
+        submit_item(t, options.timeout, std::move(wi));         // 递交异步任务给其他的 reactor
         return fut;
     }
     void start(unsigned cpuid);
@@ -331,6 +341,7 @@ public:
     {
         using ret_type = std::result_of_t<Func()>;
 
+        // t 是运行 func 的 cpu core, 这里判断 t 是否是本线程的 cpu core, 如果是的话直接运行，否则通过消息队列递交给对应的 cpu 去执行
         if (t == this_shard_id())
         {
             try
@@ -361,7 +372,7 @@ public:
         }
         else
         {
-            return _qs[t][this_shard_id()].submit(t, options, std::forward<Func>(func));
+            return _qs[t][this_shard_id()].submit(t, options, std::forward<Func>(func));    // 递交给其他 cpu 去执行
         }
     }
     /// Runs a function on a remote core.

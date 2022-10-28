@@ -279,7 +279,7 @@ static size_t alloc_from_node(cpu& this_cpu, hwloc_obj_t node, std::unordered_ma
     auto taken = std::min(local_memory - used_mem[node], alloc);
     if (taken) {
         used_mem[node] += taken;
-        auto node_id = hwloc_bitmap_first(node->nodeset);
+        auto node_id = hwloc_bitmap_first(node->nodeset);       // NUMA node index
         assert(node_id != -1);
         this_cpu.mem.push_back({taken, unsigned(node_id)});
     }
@@ -336,10 +336,12 @@ allocate_io_queues(hwloc_topology_t& topology, std::vector<cpu> cpus, unsigned n
     // hwloc for that, because at this point we are not longer talking about the physical system,
     // but the actual booted seastar server instead. So if we have restricted the run to a subset
     // of the available processors, counting topology nodes won't spur the same result.
+    // 第一个是找出系统中有多少个节点。我们不能使用hwloc，因为在这一点上，我们不再讨论物理系统，而是实际启动的seastar服务器。因此，如果我们将运行限制在可用处理器的一个子集内，那么计算拓扑节点将不会得到相同的结果。
     //
     // Secondly, we need to find out which processors live in each node. For a reason similar to the
     // above, hwloc won't do us any good here. Later on, we will use this information to assign
     // shards to coordinators that are node-local to themselves.
+    // 其次，我们需要找出每个节点上有哪些处理器。出于类似于上面的原因，hwloc在这里不会对我们有任何帮助。稍后，我们将使用这些信息来将分片分配给自身是节点本地的协调器。
     std::unordered_map<unsigned, std::set<unsigned>> numa_nodes;
     for (auto shard: boost::irange(0, int(cpus.size()))) {
         auto node_id = node_of_shard(shard);
@@ -458,28 +460,28 @@ resources allocate(configuration c) {
 #else
     auto available_memory = machine->memory.total_memory;
 #endif
-    size_t mem = calculate_memory(c, std::min(available_memory,
-                                              cgroup::memory_limit()));
-    unsigned available_procs = hwloc_get_nbobjs_by_type(topology, HWLOC_OBJ_PU);
-    unsigned procs = c.cpus.value_or(available_procs);
+    size_t mem = calculate_memory(c, std::min(available_memory, cgroup::memory_limit()));       // 计算系统剩余的内存
+    unsigned available_procs = hwloc_get_nbobjs_by_type(topology, HWLOC_OBJ_PU);        //
+    unsigned procs = c.cpus.value_or(available_procs);      // 计算 seastar 服务器启动需要的 cpu core 数量
     if (procs > available_procs) {
         throw std::runtime_error("insufficient processing units");
     }
+    // 计算将系统内存按照 cpu core 的数量分为相同的若干份，每一个 cpu core 需要的内存的大小
     auto mem_per_proc = align_down<size_t>(mem / procs, 2 << 20);
 
     resources ret;
-    std::unordered_map<hwloc_obj_t, size_t> topo_used_mem;
+    std::unordered_map<hwloc_obj_t, size_t> topo_used_mem;      // hwloc_obj_t: NUMA node index
     std::vector<std::pair<cpu, size_t>> remains;
     size_t remain;
 
     auto cpu_sets = distribute_objects(topology, procs);
 
-    // Divide local memory to cpus
+    // Divide local memory to cpus. 将本地内存分配给不同的 cpu core
     for (auto&& cs : cpu_sets()) {
         auto cpu_id = hwloc_bitmap_first(cs);
         assert(cpu_id != -1);
         auto pu = hwloc_get_pu_obj_by_os_index(topology, cpu_id);
-        auto node = get_numa_node_for_pu(topology, pu);
+        auto node = get_numa_node_for_pu(topology, pu);     // node 实际上就是 NUMA node
         cpu this_cpu;
         this_cpu.cpu_id = cpu_id;
         remain = mem_per_proc - alloc_from_node(this_cpu, node, topo_used_mem, mem_per_proc);
