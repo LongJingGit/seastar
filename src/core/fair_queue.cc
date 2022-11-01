@@ -162,7 +162,7 @@ void fair_queue::dispatch_requests()
 {
     while (can_dispatch())
     {
-        priority_class_ptr h;
+        priority_class_ptr h;       // h 的类型是 priority_class 的指针
         do
         {
             h = pop_priority_class();
@@ -196,7 +196,7 @@ void fair_queue::dispatch_requests()
             push_priority_class(h);
         }
 
-        req.func();         // engine().submit_io
+        req.func();     // priority_class::request::func
     }
 }
 

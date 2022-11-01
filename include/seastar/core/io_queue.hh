@@ -79,7 +79,7 @@ private:
     };
 
     std::vector<std::vector<lw_shared_ptr<priority_class_data>>> _priority_classes;
-    fair_queue _fq;
+    fair_queue _fq; // 实际上并不会在 _fq 中保存异步任务，而是把 _fq 作为一个接口，真实的任务都保存在 priority_class_data::priority_class_ptr 中
 
     static constexpr unsigned _max_classes = 2048;
     static std::mutex _register_lock;

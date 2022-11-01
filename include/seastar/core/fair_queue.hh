@@ -94,12 +94,19 @@ public:
 /// \cond internal
 class priority_class {
     struct request {
-        noncopyable_function<void()> func;
+        noncopyable_function<void()> func;      // 该 func 中会把异步 req 通过 engine().submit_io() 保存到 _pending_io 中
         fair_queue_ticket desc;
     };
     friend class fair_queue;
     uint32_t _shares = 0;
     float _accumulated = 0;
+    /**
+     * 对 _queue 的说明:
+     * 1. 保存着 priority_class::request.
+     * 2. 向 _queue 中添加元素是在 io_queue::queue_request.
+     * 3. 执行 request 中的 func 是在 io_queue_submission_pollfn::poll --> fair_queue::dispatch_requests 中.
+     * 4. 在 kernel_submit_work_pollfn 中将上一步添加到 _pending_io 中的异步任务递交给内核
+     */
     circular_buffer<request> _queue;
     bool _queued = false;
 

@@ -1299,6 +1299,7 @@ private:
                 noncopyable_function<future<std::unique_ptr<network_stack>> (options opts)>> map;
         return map;
     }
+    // 默认的是 posix stack
     static sstring& _default() {
         static sstring def;
         return def;
@@ -1538,7 +1539,7 @@ reactor::flush_pending_aio()
 
 bool
 reactor::reap_kernel_completions() {
-    auto reaped = _backend->reap_kernel_completions();
+    auto reaped = _backend->reap_kernel_completions();      // 查询内核是否已经完成
     for (auto& ioq : my_io_queues) {
         ioq->process_completions();
     }
@@ -2770,8 +2771,8 @@ int reactor::run()
     poller smp_poller(std::make_unique<smp_pollfn>(*this));     // 处理线程之间相互递交异步任务的 poller(当前 reactor 将异步任务递交给其他 reactor, 当前 reactor 接收从其他 reactor 递交过来的异步任务)
 
     poller reap_kernel_completions_poller(std::make_unique<reap_kernel_completions_pollfn>(*this));
-    poller io_queue_submission_poller(std::make_unique<io_queue_submission_pollfn>(*this));// 把异步 io 保存到 _pending_io 中(不是所有类型的任务都会使用该 poller 将异步io添加到 _pend_io 中，比如网络socket)
-    poller kernel_submit_work_poller(std::make_unique<kernel_submit_work_pollfn>(*this));      // 将异步任务递交给内核
+    poller io_queue_submission_poller(std::make_unique<io_queue_submission_pollfn>(*this));// 把异步 io 保存到 _pending_io 中(不是所有类型的任务都会使用该 poller 将异步io添加到 _pending_io 中，比如网络socket??)
+    poller kernel_submit_work_poller(std::make_unique<kernel_submit_work_pollfn>(*this));      // 将 _pending_io 中的异步任务递交给内核
     poller final_real_kernel_completions_poller(std::make_unique<reap_kernel_completions_pollfn>(*this)); // 查询内核是否已完成异步任务
 
     poller batch_flush_poller(std::make_unique<batch_flush_pollfn>(*this));
@@ -3416,7 +3417,7 @@ void network_stack_registry::register_stack(sstring name,
     _map()[name] = std::move(create);
     options_description().add(opts);
     if (make_default) {
-        _default() = name;
+        _default() = name;      // 默认的 stack
     }
 }
 
@@ -3450,7 +3451,7 @@ network_stack_registry::create(sstring name, options opts) {
     if (!_map().count(name)) {
         throw std::runtime_error(format("network stack {} not registered", name));
     }
-    return _map()[name](opts);
+    return _map()[name](opts);      // 执行 stack 的 create(ops) 函数, 比如 posix_network_stack::create(ops)
 }
 
 static bool kernel_supports_aio_fsync() {
@@ -4277,13 +4278,21 @@ bool smp::poll_queues()
         if (this_shard_id() != i)
         {
             auto& rxq = _qs[this_shard_id()][i];
-            rxq.flush_response_batch();                 // 将已经完成的异步任务保存到 _completed 中
+            rxq.flush_response_batch();        // 将已经完成的异步任务从 _completed_fifo 中移动到 _completed 中
             got += rxq.has_unflushed_responses();
-            got += rxq.process_incoming();              // 将其他 reactor 递交过来的 task 添加到本 reactor 的任务队列中
+            got += rxq.process_incoming();  // 从 _pending 中读取其他 reactor 发送过来的异步任务, 然后将这些任务添加到本 reactor 的任务队列中
 
             auto& txq = _qs[i][this_shard_id()];
-            txq.flush_request_batch();                  // 填充需要发送给对端 reactor 的任务队列 _pending，并通过 event_fd 唤醒对端 reactor
-            got += txq.process_completions(i);          // 执行已经完成的异步任务的 promise 的 set_value
+            txq.flush_request_batch();   // 将需要发送给其他 reactor 的异步任务从 _tx.a.pending_fifo 移动到 _pending 中
+            got += txq.process_completions(i);   // 依次执行 _completed 中已经完成的异步任务的 promise 的 set_value
+
+            /**
+             * 注意: rxq.flush_response_batch 中填充的 _completed 需要另一个 reactor 执行 txq.process_completions. 比如:
+             * 1. reactor-1 通过 _qs[2][1]._pending 向 reactor-2 递交了异步任务 taskA;
+             * 2. reactor-2 从 _qs[2][1]._pending 中读取到了 reactor-1 递交过来的异步任务 taskA;
+             * 3. reactor-2 完成了 taskA 之后，会把 taskA 添加到 _qs[2][1]._completed 中;
+             * 4. reactor-1 从 _qs[2][1]._completed 中读取到了 taskA, 说明此时完成了异步任务 taskA, 然后执行 taskA->promise->set_value 了
+             */
         }
     }
 

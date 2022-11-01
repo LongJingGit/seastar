@@ -49,10 +49,10 @@ struct aio_general_context {
     explicit aio_general_context(size_t nr);
     ~aio_general_context();
     internal::linux_abi::aio_context_t io_context{};
-    std::unique_ptr<internal::linux_abi::iocb*[]> iocbs;
+    std::unique_ptr<internal::linux_abi::iocb*[]> iocbs;        // 保存异步任务的容器
     internal::linux_abi::iocb** last = iocbs.get();
-    void queue(internal::linux_abi::iocb* iocb);
-    size_t flush();
+    void queue(internal::linux_abi::iocb* iocb);        // 通过该接口向 iocbs 中添加异步任务
+    size_t flush();     // 将 iocbs 中的异步任务递交给内核
 };
 
 class aio_storage_context {
@@ -71,7 +71,7 @@ class aio_storage_context {
 
     reactor* _r;
     internal::linux_abi::aio_context_t _io_context;
-    boost::container::static_vector<internal::linux_abi::iocb*, max_aio> _submission_queue;
+    boost::container::static_vector<internal::linux_abi::iocb*, max_aio> _submission_queue;     // 保存异步任务
     iocb_pool _iocb_pool;
     size_t handle_aio_error(internal::linux_abi::iocb* iocb, int ec);
     using pending_aio_retry_t = boost::container::static_vector<internal::linux_abi::iocb*, max_aio>;
@@ -83,20 +83,20 @@ public:
 
     bool reap_completions();
     void schedule_retry();
-    bool submit_work();
+    bool submit_work();     // 将异步任务递交给内核
     bool can_sleep() const;
 };
 
 class completion_with_iocb {
     bool _in_context = false;
-    internal::linux_abi::iocb _iocb;
+    internal::linux_abi::iocb _iocb;        // 保存着异步任务
 protected:
     completion_with_iocb(int fd, int events, void* user_data);
     void completed() {
         _in_context = false;
     }
 public:
-    void maybe_queue(aio_general_context& context);
+    void maybe_queue(aio_general_context& context);     // 将 _iocb 中的异步任务添加到 aio_general_context::iocbs 中
 };
 
 class fd_kernel_completion : public kernel_completion {
@@ -257,7 +257,7 @@ class reactor_backend_aio : public reactor_backend {
     // signals), the other for non-preempting events (fd poll).
     preempt_io_context _preempting_io; // Used for the timer tick and the high resolution timer
     aio_general_context _polling_io{max_polls}; // FIXME: unify with disk aio_context
-    hrtimer_aio_completion _hrtimer_poll_completion;
+    hrtimer_aio_completion _hrtimer_poll_completion;        // hrtimer: 内核高精度定时器
     smp_wakeup_aio_completion _smp_wakeup_aio_completion;
     static file_desc make_timerfd();
     bool await_events(int timeout, const sigset_t* active_sigmask);

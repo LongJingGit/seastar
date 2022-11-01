@@ -272,7 +272,7 @@ private:
     // Not all reactors have IO queues. If the number of IO queues is less than the number of shards,
     // some reactors will talk to foreign io_queues. If this reactor holds a valid IO queue, it will
     // be stored here.
-    // 这里的 io 主要是在 file 操作中使用
+    // 这里的 io 主要是在 file 操作中使用. 用户对 IO 的读写操作会被先保存到这里. 在 io_queue_submission_pollfn 中会将 io_queue 中的异步 io 添加到 _pending_io 中, 然后在 kernel_submit_work_pollfn 中又把 _pending_io 中的异步 io 递交给内核
     std::vector<std::unique_ptr<io_queue>> my_io_queues;
     std::unordered_map<dev_t, io_queue*> _io_queues;        // dev_t: NUMA node index
     friend io_queue;

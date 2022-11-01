@@ -268,6 +268,7 @@ io_queue::queue_request(const io_priority_class& pc, size_t len, internal::io_re
         auto desc = std::make_unique<io_desc_read_write>(this, weight, size);
         auto fq_ticket = desc->fq_ticket();
         auto fut = desc->get_future();
+        // 注意: _fq 中保存着这里的 lambda 表达式, 并不是异步 req, 等到执行该 lambda 的时候才会把异步 req 保存到 _pending_io 中
         _fq.queue(pclass.ptr, std::move(fq_ticket), [&pclass, start, req = std::move(req), desc = desc.release(), len, this] () mutable noexcept {
             _queued_requests--;
             _requests_executing++;
@@ -276,7 +277,7 @@ io_queue::queue_request(const io_priority_class& pc, size_t len, internal::io_re
                 pclass.ops++;
                 pclass.bytes += len;
                 pclass.queue_time = std::chrono::duration_cast<std::chrono::duration<double>>(std::chrono::steady_clock::now() - start);
-                engine().submit_io(desc, std::move(req));
+                engine().submit_io(desc, std::move(req));       // 将异步 req 保存到 _pendind_io 中, kernel_submit_work_pollfn 中会将 _pending_io 中的异步任务递交给内核
             } catch (...) {
                 desc->set_exception(std::current_exception());
             }

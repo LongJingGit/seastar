@@ -431,9 +431,9 @@ bool reactor_backend_aio::reap_kernel_completions() {
 }
 
 bool reactor_backend_aio::kernel_submit_work() {
-    _hrtimer_poll_completion.maybe_queue(_polling_io);
-    bool did_work = _polling_io.flush();           // 将 iocbs 中的异步 io 任务递交给内核
-    did_work |= _storage_context.submit_work();    // 将 _pending_io 中的异步 io 任务递交给内核
+    _hrtimer_poll_completion.maybe_queue(_polling_io);      // 将 _hrtimer_poll_completion 中的异步任务追加到 _polling_io 中
+    bool did_work = _polling_io.flush();           // 将 _polling_io 中的异步 io 任务递交给内核
+    did_work |= _storage_context.submit_work();    // 将 _storage_context 中的异步 io 任务递交给内核
     return did_work;
 }
 

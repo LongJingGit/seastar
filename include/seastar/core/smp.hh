@@ -176,16 +176,8 @@ class smp_message_queue
         ~lf_queue();
     };
 
-    /**
-     * _pending 的作用:
-     * 1. 保存本端 reactor 要发给对端 reactor 的异步任务
-     * 2. 保存本端 reactor 从对端 reactor 接收的异步任务
-     *
-     * _completed 的作用:
-     * 1. 保存本端 reactor 已经执行完毕的异步任务. 异步任务完成之后，就可以执行 promise 的 set_value
-     */
-    lf_queue _pending;      // 构造该实例时，传入的 reactor 是对端的 reactor
-    lf_queue _completed;    // 构造该实例时传入的 reactor 是本端的 reactor
+    lf_queue _pending;      // reactor 事件循环 smp::poll_queues 中, reactor 之间发送和接收异步任务
+    lf_queue _completed;    // reactor 事件循环 smp::poll_queues 中, 异步任务执行结束之后会被添加到该 queue 中
 
     struct alignas(seastar::cache_line_size) {
         size_t _sent = 0;
@@ -258,13 +250,13 @@ class smp_message_queue
         ~tx_side() {}
         void init() { new (&a) aa; }
         struct aa {
-            // 1. smp_message_queue::submit_item 会把需要递交给其他 reactor 的异步任务保存到 pending_fifo 中
-            // 2. smp::poll_queues 会把保存在 pending_fifo 中的异步任务添加到队列 _pending 中
+            // 1. 用户通过外部调用最终调用到 smp_message_queue::submit_item 中, 然后把需要递交给其他 reactor 的异步任务保存到 pending_fifo 中
+            // 2. reactor 事件循环中, smp::poll_queues 会把保存在 pending_fifo 中的异步任务添加到队列 _pending 中
             std::deque<work_item*> pending_fifo;
         } a;
     } _tx;
 
-    std::vector<work_item*> _completed_fifo; // 保存已经完成的异步任务，在 async_work_item::run_and_dispose 填充
+    std::vector<work_item*> _completed_fifo; // 保存已经完成的异步任务，在 async_work_item::run_and_dispose 填充. 该容器中的任务在 reactor 的事件循环中会被添加到 _completed 中
 
 public:
     smp_message_queue(reactor* from, reactor* to);
@@ -305,7 +297,7 @@ class smp {
     struct qs_deleter {
       void operator()(smp_message_queue** qs) const;
     };
-    static std::unique_ptr<smp_message_queue*[], qs_deleter> _qs;
+    static std::unique_ptr<smp_message_queue*[], qs_deleter> _qs;       // reactor 之间相互递交任务的队列, 定义在 reactor.cc 中
     static std::thread::id _tmain;
     static bool _using_dpdk;
 
