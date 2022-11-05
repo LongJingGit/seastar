@@ -284,7 +284,7 @@ private:
     bool _finished_running_tasks = false;
     condition_variable _stop_requested;
     bool _handle_sigint = true;
-    compat::optional<future<std::unique_ptr<network_stack>>> _network_stack_ready;
+    compat::optional<future<std::unique_ptr<network_stack>>> _network_stack_ready;      // 是一个已经就绪的 future
     int _return = 0;
 
     /* 每个 reactor 都有一个 promise, 每个 promise 通过调用 get_future 方法来获取 future 对象.

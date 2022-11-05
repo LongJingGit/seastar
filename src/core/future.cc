@@ -91,7 +91,7 @@ void promise_base::make_ready() noexcept
 {
     if (_task)
     {
-        _state = nullptr;
+        _state = nullptr;       // 在此之前, _state 指向 continuation_base::_state
         if (Urgent == urgent::yes && !need_preempt())
         {
             ::seastar::schedule_urgent(std::exchange(_task, nullptr));

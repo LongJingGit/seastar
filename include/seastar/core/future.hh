@@ -195,7 +195,7 @@ struct uninitialized_wrapper_base<T, true> : private T
     template<typename... U>
     void uninitialized_set(U&&... vs)
     {
-        new (this) T(std::forward<U>(vs)...);
+        new (this) T(std::forward<U>(vs)...);       // 在 promise 执行 set_value 的时候会被调用
     }
 
     T& uninitialized_get()
@@ -485,7 +485,7 @@ struct future_state :  public future_state_base, private internal::uninitialized
     void set(A&&... a)
     {
         assert(_u.st == state::future);
-        new (this) future_state(ready_future_marker(), std::forward<A>(a)...);      // 将 _u.st 设置为 state::result
+        new (this) future_state(ready_future_marker(), std::forward<A>(a)...);      // 将 _u.st 设置为 state::result, 将 uninitialized_wrapper_base::_v 设置为 3
     }
 
     future_state(exception_future_marker m, std::exception_ptr&& ex) noexcept : future_state_base(std::move(ex)) { }
@@ -555,7 +555,9 @@ template <typename... T>
 class continuation_base : public task
 {
 protected:
-    future_state<T...> _state;      // 调用无参构造函数时, _state 被初始化成了 state::result
+    // 调用无参构造函数时, _state 被初始化成了 state::future
+    // 如果 promise_base 中的 _state 指向 continuation_base::_state, 则在 promise 执行 set_value 时, 会将这里的 _state 设置为 result, 并且设置 _state._v 的值
+    future_state<T...> _state;
     using future_type = future<T...>;
     using promise_type = promise<T...>;
 
@@ -607,6 +609,7 @@ struct continuation final : continuation_base_with_promise<Promise, T...>
 
     virtual void run_and_dispose() noexcept override        // 在 reactor 的事件循环中，会调用该接口执行一个任务
     {
+        // 这里的 _func 是 then_impl_nrvo --> schedule 中的 lambda; _state 在 promise 执行 set_value 的时候已经被赋值
         _func(this->_pr, std::move(this->_state));      // 真正执行 task 的函数. 注意，这里的参数 this->_pr 是新创建的 promise
         delete this;
     }
@@ -761,10 +764,10 @@ public:
     template <typename... A>
     void set_value(A&&... a)
     {
-        if (auto *s = get_state())
+        if (auto *s = get_state())      // 此时 promise 的 _state 已经指向了 then(func) 中的 continuation_base::state. 具体参见 void schedule(Pr&& pr, Func&& func)
         {
-            s->set(std::forward<A>(a)...);     // 将 promise_base 的 state 设置成 state::result
-            make_ready<urgent::no>();       // 将 _task 添加到 reactor 的任务队列中
+            s->set(std::forward<A>(a)...); // 调用 future_state::set. 将 state::_u 设置为 state::result, 将 state::_v 设置为 a. (实际上设置的是 continuation_base 的 _state)
+            make_ready<urgent::no>();      // 将 _task 添加到 reactor 的任务队列中
         }
     }
 
@@ -780,8 +783,9 @@ private:
     template <typename Pr, typename Func>
     void schedule(Pr&& pr, Func&& func) noexcept
     {
+        // continuation 中的 _state 被初始化成了 state::future. (在执行旧的 promise 的 set_value 的时候会将 state 设置为 result, 并且设置 state::_v)
         auto tws = new continuation<Pr, Func, T...>(std::move(pr), std::move(func));
-        _state = &tws->_state;
+        _state = &tws->_state;      // 注意，旧的 promise 的 _state 指向了 continuation_base 中的 _state
         _task = tws;    // 将 continuation 绑定到 promise 的 _task 中, 当 promise 执行 set_value 时会将该 task 添加到 reactor 的任务队列中
     }
 
@@ -1522,9 +1526,9 @@ private:
             /**
              * fut.get_promise() 会使用新创建的 future 然后构造新的 promise 对象，并且将新的 promise 对象中的 _state 指向 future 的 _state
              *
-             * 匿名函数的入参 pr 是新创建的 promise, 第二个形参 state 是 continuation_base 中的 state
-             * 开始调用这里的 lambda 是在 continuation 的 run_and_dispose() 方法中
-             * 这里的 state 在 promise 的 set_value 中会被设置成 state::result
+             * 这个 lambda 表达式会在调用该 then_impl_nrvo 接口的 future 对应的 promise 执行 set_value 的时候才会被调用，具体是在 continuation 的 run_and_dispose() 方法中. 其中,
+             * 1. 入参 pr 是新创建的 promise,
+             * 2. 入参 state 是 continuation_base 中的 state. schedule 中会将 lambda 封装成 task, 并且会将该 state 被初始化成 state::future. (在旧的 promise 执行 set_value 时, 会将 state::_u 设置为 result, 并且会设置 state::_v 的值)
              */
             schedule(fut.get_promise(), [func = std::forward<Func>(func)] (pr_type& pr, future_state<T...>&& state) mutable {
                 if (state.failed())
@@ -1547,6 +1551,7 @@ private:
                         // void futurize<future<Args...>>::satisfy_with_result_of(internal::promise_base_with_type<Args...>&& pr, Func&& func)
                         // 这里的 state 已经被设置成了 state::result
                         futurator::satisfy_with_result_of(std::move(pr), [&func, &state] {
+                            // 注意，这里调用 func 时传入的参数是 state::_v, 该变量是在旧的 promise 执行 set_value 的时候被创建的
                             return ::seastar::apply(std::forward<Func>(func), std::move(state).get_value());
                         });
                     }

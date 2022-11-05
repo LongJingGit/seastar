@@ -28,9 +28,9 @@ using namespace seastar;
 
 future<bool> test_smp_call() {
     return smp::submit_to(1, [] {
-        return make_ready_future<int>(3);
+        return make_ready_future<int>(3);       // 已经就绪的 future, state::_u 被设置为 result, 并且 state::_v 被设置为 3
     }).then([] (int ret) {
-        return make_ready_future<bool>(ret == 3);
+        return make_ready_future<bool>(ret == 3);   // Line31 执行完之后，才会执行这里的 lambda
     });
 }
 

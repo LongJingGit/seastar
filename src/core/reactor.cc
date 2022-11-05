@@ -2768,12 +2768,20 @@ int reactor::run()
      * 然后由 reactor 在事件循环中将 poller 添加到 _pollers 里面
      */
 
-    poller smp_poller(std::make_unique<smp_pollfn>(*this));     // 处理线程之间相互递交异步任务的 poller(当前 reactor 将异步任务递交给其他 reactor, 当前 reactor 接收从其他 reactor 递交过来的异步任务)
+    // 处理线程之间相互递交异步任务的 poller(当前 reactor 将异步任务递交给其他 reactor, 当前 reactor 接收从其他 reactor 递交过来的异步任务)
+    poller smp_poller(std::make_unique<smp_pollfn>(*this));
 
+    // 查询内核是否已完成异步任务
     poller reap_kernel_completions_poller(std::make_unique<reap_kernel_completions_pollfn>(*this));
-    poller io_queue_submission_poller(std::make_unique<io_queue_submission_pollfn>(*this));// 把异步 io 保存到 _pending_io 中(不是所有类型的任务都会使用该 poller 将异步io添加到 _pending_io 中，比如网络socket??)
-    poller kernel_submit_work_poller(std::make_unique<kernel_submit_work_pollfn>(*this));      // 将 _pending_io 中的异步任务递交给内核
-    poller final_real_kernel_completions_poller(std::make_unique<reap_kernel_completions_pollfn>(*this)); // 查询内核是否已完成异步任务
+
+    // 把异步 io 保存到 _pending_io 中. (如果不是 io 任务，就不需要递交给内核执行，而是直接在 reactor 的事件循环 run_some_tasks 中执行)
+    poller io_queue_submission_poller(std::make_unique<io_queue_submission_pollfn>(*this));
+
+    // 将 _pending_io 中的异步任务递交给内核
+    poller kernel_submit_work_poller(std::make_unique<kernel_submit_work_pollfn>(*this));
+
+    // 查询内核是否已完成异步任务
+    poller final_real_kernel_completions_poller(std::make_unique<reap_kernel_completions_pollfn>(*this));
 
     poller batch_flush_poller(std::make_unique<batch_flush_pollfn>(*this));
     poller execution_stage_poller(std::make_unique<execution_stage_pollfn>());
@@ -2792,31 +2800,31 @@ int reactor::run()
 
     // Start initialization in the background.
     // Communicate when done using _start_promise.
-    // 等待 cpu start
     /**
-     * .wait() 返回的是已经绑定 promise 的 future, 所以后面会将 lambda 直接封装成 continuation, 然后挂载到 promise 的 task 上,
-     * 但是并不会立即将 task 放进 reactor 的任务队列，而是等待 promise 执行完 set_value 之后才会将该 task 放到任务队列，然后由 reactor 执行.
-     *
-     * NOTE: 什么时候会执行 wait 接口中创建的 promise 的 set_value ?
-     * .wait() 接口中将 promise 封装到了 entry 中，然后放到了 _wait_list 中, 在 signal 中会从 _wait_list 中逐个取出 entry 然后执行 set_value
+     * _cpu_started.wait(smp::count): 等待 smp::count 个 cpu 全部就绪.
+     * 1. wait() 返回的是没有就绪的 future, 所以 then 中的 func 不会被立即执行，而是被封装到 task 中, 等待 promise 执行 set_value,
+     * 2. wait() 中会将 future 对应的 promise 封装到 entry 中，然后将 entry 保存到 _wait_list 中,
+     * 3. 在 _cpu_started.signal() 中会依次执行 _wait_list 中 promise 的 set_value,
+     * 4. (3) 完成之后, (1) 中被封装的 task 会被添加到 reactor 的任务队列，然后在 reactor 的事件循环中被执行
      */
     (void)_cpu_started.wait(smp::count).then([this] {
         /* initialize 返回的是一个就绪态的 future, 所以后面 then 调用中的 lambda 会被封装到 continuation 然后放进 reactor 的任务队列直接执行,
          * 不用等待 promise 执行 set_value */
         (void)_network_stack->initialize().then([this] {
-            _start_promise.set_value();    // promise 执行 set_value(), run_deprecated 中的第一个 then 调用中的任务开始执行
+            // promise 执行 set_value(), run_deprecated 中的第一个 then 调用中的任务开始执行.
+            // 需要注意的是，执行 _start_promise.set_value() 时，此时并没有进入 reactor 的事件循环中
+            _start_promise.set_value();
         });
     });
 
     // Wait for network stack in the background and then signal all cpus.
-    /**
-     * NOTE: _network_stack_ready 是一个 future 类型，但是该 future 没有绑定 promise 且是就绪状态, 所以 then() 中对应的 lambda 会被封装
-     * 到 continuation 里面，然后加入到 reactor 的任务队列中，由 reactor 在下一次事件循环中执行.
-     */
+    // _network_stack_ready 是一个已经就绪的 future, 所以 then 中的 func 会被立即执行, 不用等待 promise 执行 set_value
     (void)_network_stack_ready->then([this] (std::unique_ptr<network_stack> stack) {
         _network_stack = std::move(stack);
         return smp::invoke_on_all([] {
-            engine()._cpu_started.signal();     // 通知 cpu started.
+            // 1. 递增 _cpu_started.wait() 中等待的变量
+            // 2. 从 _wait_list 中依次取出 promise, 执行 set_value
+            engine()._cpu_started.signal();
         });
     });
 
@@ -3451,7 +3459,7 @@ network_stack_registry::create(sstring name, options opts) {
     if (!_map().count(name)) {
         throw std::runtime_error(format("network stack {} not registered", name));
     }
-    return _map()[name](opts);      // 执行 stack 的 create(ops) 函数, 比如 posix_network_stack::create(ops)
+    return _map()[name](opts);      // 执行 stack 的 create(ops) 函数, 比如 posix_network_stack::create(ops). 返回的是已经就绪的 future
 }
 
 static bool kernel_supports_aio_fsync() {
@@ -4057,7 +4065,11 @@ void smp::configure(boost::program_options::variables_map configuration, reactor
         rc.num_io_queues.emplace(id, disk_config.num_io_queues(id));
     }
 
+    // 同一进程内的不同线程之间内存是共享的，分配与释放内存时，依然会有同步的存在。为了避免此问题, Seastar 在应用启动时，将整个虚拟地址空间按照 CPU 核数等分为若干块，每个 CPU 使用自己的内存块进行内存的分配和释放，从而避免同步.
+    // 疑问: "每个 CPU 使用自己的内存块进行内存的分配和释放" 这部分在哪里体现
+
     // 调用 hwloc 的接口，获取 cpu 拓扑信息，然后将操作系统的内存空间按照 CPU 核数分为相同的若干份
+    // 后面会在这些内存中创建用于给内核递交异步任务的 io_queue
     auto resources = resource::allocate(rc);
     std::vector<resource::cpu> allocations = std::move(resources.cpus);
     if (thread_affinity)
@@ -4138,7 +4150,7 @@ void smp::configure(boost::program_options::variables_map configuration, reactor
 
     _all_event_loops_done.emplace(smp::count);
 
-    auto backend_selector = configuration["reactor-backend"].as<reactor_backend_selector>();
+    auto backend_selector = configuration["reactor-backend"].as<reactor_backend_selector>();        // 默认的是 aio
 
     /* 为除了 cpu0 之外的所有 cpu core（也可以配置成只使用部分 cpu core）起一个线程，线程中分配一块内存给 reactor 类对象，每个线程都有这个对象，
      * 然后调用 reactor.run() 方法开始运行线程。 */
@@ -4177,7 +4189,7 @@ void smp::configure(boost::program_options::variables_map configuration, reactor
 
                 for (auto& dev_id : disk_config.device_ids())
                 {
-                    alloc_io_queue(i, dev_id);
+                    alloc_io_queue(i, dev_id);      // 每个 reactor 创建自己给内核递交异步任务的 io_queue
                 }
 
                 reactors_registered.wait();
@@ -4191,7 +4203,6 @@ void smp::configure(boost::program_options::variables_map configuration, reactor
 
                 inited.wait();
                 engine().configure(configuration);
-                // engine() 返回的是 reactor 对象，每一个线程都有一个 reactor 对象
                 engine().run();     // 开始运行线程
             }
             catch (const std::exception& e)
@@ -4292,6 +4303,8 @@ bool smp::poll_queues()
              * 2. reactor-2 从 _qs[2][1]._pending 中读取到了 reactor-1 递交过来的异步任务 taskA;
              * 3. reactor-2 完成了 taskA 之后，会把 taskA 添加到 _qs[2][1]._completed 中;
              * 4. reactor-1 从 _qs[2][1]._completed 中读取到了 taskA, 说明此时完成了异步任务 taskA, 然后执行 taskA->promise->set_value 了
+             * 5. 如果 reactor-1 的 taskA 后面还有异步任务 taskB, 此时 taskB 应该已经被添加到 taskA->promise->_task 上了，所以当 (4) 执行 set_value 的时候, taskB 就会被添加到 reactor 的任务队列中
+             *
              */
         }
     }

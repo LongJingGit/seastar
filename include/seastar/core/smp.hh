@@ -205,6 +205,8 @@ class smp_message_queue
         virtual void complete() = 0;
     };
 
+    // async_work_item 一般作为异步任务在不同的 reactor 之间被传递，需要特别注意的是, 调用 run_and_dispose() 的 reactor 和调用 complete() 的 reactor 不是同一个 reactor.
+    // 比如 reactor-0 把 taskA 传递给 reactor-1, 那么 reactor-1 执行 run_and_dispose, 然后由 reactor-0 执行 complete
     template <typename Func>
     struct async_work_item : work_item {
         smp_message_queue& _queue;
@@ -212,7 +214,7 @@ class smp_message_queue
         using futurator = futurize<std::result_of_t<Func()>>;
         using future_type = typename futurator::type;
         using value_type = typename future_type::value_type;
-        compat::optional<value_type> _result;
+        compat::optional<value_type> _result;       // std::tuple<T...>
         std::exception_ptr _ex; // if !_result
         typename futurator::promise_type _promise; // used on local side
         async_work_item(smp_message_queue& queue, smp_service_group ssg, Func&& func) : work_item(ssg), _queue(queue), _func(std::move(func)) {}
@@ -226,7 +228,7 @@ class smp_message_queue
                 if (f.failed()) {
                     _ex = f.get_exception();
                 } else {
-                    _result = f.get();
+                    _result = f.get();      // 注意，在这里如果执行成功, 会把执行成功的结果赋给 _result
                 }
                 _queue.respond(this);       // 异步任务完成，填充 _completed_fifo
             });
@@ -235,6 +237,7 @@ class smp_message_queue
         }
         virtual void complete() override {
             if (_result) {
+                // 将 promise 上的 task 添加到 reactor 的任务队列中, 也就是 _promise.get_future() 返回的 future 的 .then(func) 中的 func 会被执行
                 _promise.set_value(std::move(*_result));
             } else {
                 // FIXME: _ex was allocated on another cpu
@@ -248,7 +251,7 @@ class smp_message_queue
     {
         tx_side() {}
         ~tx_side() {}
-        void init() { new (&a) aa; }
+        void init() { new (&a) aa; }        // 在 io_queue.start() 接口中调用
         struct aa {
             // 1. 用户通过外部调用最终调用到 smp_message_queue::submit_item 中, 然后把需要递交给其他 reactor 的异步任务保存到 pending_fifo 中
             // 2. reactor 事件循环中, smp::poll_queues 会把保存在 pending_fifo 中的异步任务添加到队列 _pending 中
@@ -264,6 +267,7 @@ public:
     template <typename Func>
     futurize_t<std::result_of_t<Func()>> submit(shard_id t, smp_submit_to_options options, Func&& func) noexcept {
         memory::disable_failure_guard dfg;
+        // 将异步任务封装到 async_work_item 中, 该 async_work_item 会在多个 reactor 之间相互进行传递
         auto wi = std::make_unique<async_work_item<Func>>(*this, options.service_group, std::forward<Func>(func));
         auto fut = wi->get_future();
         submit_item(t, options.timeout, std::move(wi));         // 递交异步任务给其他的 reactor
@@ -364,7 +368,7 @@ public:
         }
         else
         {
-            return _qs[t][this_shard_id()].submit(t, options, std::forward<Func>(func));    // 递交给其他 cpu 去执行
+            return _qs[t][this_shard_id()].submit(t, options, std::forward<Func>(func));    // 递交给其他 cpu 去执行. 返回的是未就绪的 future
         }
     }
     /// Runs a function on a remote core.

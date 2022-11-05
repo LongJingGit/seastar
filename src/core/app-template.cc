@@ -150,7 +150,7 @@ app_template::run_deprecated(int ac, char ** av, std::function<void ()>&& func)
                     .positional(_pos_opts)
                     .run()
             , configuration);
-        _conf_reader(configuration);
+        _conf_reader(configuration);        // 解析配置
     }
     catch (bpo::error& e)
     {
