@@ -364,10 +364,11 @@ class posix_socket_impl final : public socket_impl {
         }
         resolve_outgoing_address(sa);
         return repeat([this, sa, local, proto, attempts = 0, requested_port = ntoh(local.as_posix_sockaddr_in().sin_port)] () mutable {
-            _fd = engine().make_pollable_fd(sa, int(proto));
+            _fd = engine().make_pollable_fd(sa, int(proto));        // make_pollable_fd: 执行 ::socket 系统调用
             _fd.get_file_desc().setsockopt(SOL_SOCKET, SO_REUSEADDR, int(_reuseaddr));
             uint16_t port = attempts++ < 5 && requested_port == 0 && proto == transport::TCP ? u(random_engine) * smp::count + this_shard_id() : requested_port;
             local.as_posix_sockaddr_in().sin_port = hton(port);
+            // posix_connect: 执行 ::connect 系统调用
             return futurize_invoke([this, sa, local] { return engine().posix_connect(_fd, sa, local); }).then_wrapped([port, requested_port] (future<> f) {
                 try {
                     f.get();
@@ -646,6 +647,7 @@ posix_network_stack::listen(socket_address sa, listen_options opt)
     }
 
     auto protocol = static_cast<int>(opt.proto);
+    // engine().posix_listen() 内部完成了 ::socket/::bind/::listen 三个系统调用
     return _reuseport ?
         server_socket(std::make_unique<posix_reuseport_server_socket_impl>(protocol, sa, engine().posix_listen(sa, opt), _allocator))
         :

@@ -2819,6 +2819,7 @@ int reactor::run()
 
     // Wait for network stack in the background and then signal all cpus.
     // _network_stack_ready 是一个已经就绪的 future, 所以 then 中的 func 会被立即执行, 不用等待 promise 执行 set_value
+    // _network_stack_ready 在 reactor::configure 中被初始化
     (void)_network_stack_ready->then([this] (std::unique_ptr<network_stack> stack) {
         _network_stack = std::move(stack);
         return smp::invoke_on_all([] {
@@ -4065,8 +4066,15 @@ void smp::configure(boost::program_options::variables_map configuration, reactor
         rc.num_io_queues.emplace(id, disk_config.num_io_queues(id));
     }
 
-    // 同一进程内的不同线程之间内存是共享的，分配与释放内存时，依然会有同步的存在。为了避免此问题, Seastar 在应用启动时，将整个虚拟地址空间按照 CPU 核数等分为若干块，每个 CPU 使用自己的内存块进行内存的分配和释放，从而避免同步.
-    // 疑问: "每个 CPU 使用自己的内存块进行内存的分配和释放" 这部分在哪里体现
+    /**
+     * 同一进程内的不同线程之间内存是共享的，分配与释放内存时，依然会有同步的存在。为了避免此问题, Seastar 在应用启动时，将整个虚拟地址空间按照 CPU 核数等分为若干块，每个 CPU 使用自己的内存块进行内存的分配和释放，从而避免同步.
+     *
+     * tutorial.md --> Memory allocation in Seastar
+     *
+     * seastar 对内存按照启动线程的数量进行了分片，每个线程都预先分配了一大块内存(在它运行的同一个 NUMA 节点上), 每个线程会使用自己的内存进行分配.
+     *
+     * 为了实现这种预分配, seastar 重写了 malloc/free/new/delete/calloc/realloc 等所有内存分配的方法. 实现在 memory.cc 中
+     */
 
     // 调用 hwloc 的接口，获取 cpu 拓扑信息，然后将操作系统的内存空间按照 CPU 核数分为相同的若干份
     // 后面会在这些内存中创建用于给内核递交异步任务的 io_queue
@@ -4202,7 +4210,7 @@ void smp::configure(boost::program_options::variables_map configuration, reactor
                 }
 
                 inited.wait();
-                engine().configure(configuration);
+                engine().configure(configuration);      // 执行 reactor::configure, 进行一些系统初始化, 比如创建网络协议栈...
                 engine().run();     // 开始运行线程
             }
             catch (const std::exception& e)

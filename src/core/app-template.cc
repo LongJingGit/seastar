@@ -238,7 +238,7 @@ app_template::run_deprecated(int ac, char ** av, std::function<void ()>&& func)
         });
     })
     .then(std::move(func))
-    .then_wrapped([] (auto&& f) {
+    .then_wrapped([] (auto&& f) {       // .then_wrapped: 检查输入的 future 是否包含异常或者值
         try
         {
             f.get();

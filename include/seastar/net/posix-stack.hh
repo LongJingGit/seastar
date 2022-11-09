@@ -275,7 +275,7 @@ public:
 
     static future<std::unique_ptr<network_stack>> create(boost::program_options::variables_map opts, compat::polymorphic_allocator<char>* allocator=memory::malloc_allocator)
     {
-        // 返回一个已经就绪的 future, _state 为 state::result
+        // 返回一个已经就绪的 future. future::_state::_u 设置为 state::result, future::_state::_v 设置为 std::unique_ptr<network_stack>
         return make_ready_future<std::unique_ptr<network_stack>>(std::unique_ptr<network_stack>(new posix_network_stack(opts, allocator)));
     }
 

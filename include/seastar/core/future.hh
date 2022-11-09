@@ -469,10 +469,12 @@ struct future_state :  public future_state_base, private internal::uninitialized
 
     template <typename... A>
     future_state(ready_future_marker, A&&... a) noexcept
-        : future_state_base(state::result)      // 执行基类的构造函数，将 future 设置为 state::result
+        : future_state_base(state::result)      // 执行基类的构造函数，将 future 的 _state::_u 设置为 state::result
     {
         try
         {
+            // 将 future 的 _state::_v 设置为 a.
+            // 注意: 这一步很关键, 这里的 a 实际上是作为多个异步任务之间的参数在进行传递，比如在链式调用 .then(func_1).then(func_2) 中, 如果想要将 func_1 的返回值作为 func_2 的入参, 那么参数传递将是通过这里的 a 进行的.
             this->uninitialized_set(std::forward<A>(a)...);
         }
         catch (...)
@@ -556,7 +558,8 @@ class continuation_base : public task
 {
 protected:
     // 调用无参构造函数时, _state 被初始化成了 state::future
-    // 如果 promise_base 中的 _state 指向 continuation_base::_state, 则在 promise 执行 set_value 时, 会将这里的 _state 设置为 result, 并且设置 _state._v 的值
+    // 如果 promise_base 中的 _state 指向 continuation_base::_state, 则在 promise 执行 set_value 时, 会将这里的 _state::_u 设置为 result, 并且设置 _state::_v 的值
+    // _state::_u 用来判断下一个异步任务是否可以执行; _state::_v 用来在两个异步任务之间传参
     future_state<T...> _state;
     using future_type = future<T...>;
     using promise_type = promise<T...>;
@@ -747,7 +750,7 @@ public:
 
     void set_urgent_state(future_state<T...>&& state) noexcept
     {
-        auto* ptr = get_state();
+        auto* ptr = get_state();        // 这里获取了 promise_base::_state 的指针，实际上这里的 promise_base::_state 已经指向了当前 promise 上绑定的 continuation 的 _state, 所以下面对 promise_base::_state 的修改实际上都是在修改 continuation::_state
         // The state can be null if the corresponding future has been
         // destroyed without producing a continuation.
         if (ptr)
@@ -756,7 +759,7 @@ public:
             // good candidate for being disabled in release builds if
             // we had such an assert.
             assert(ptr->_u.st == future_state_base::state::future);
-            new (ptr) future_state<T...>(std::move(state));
+            new (ptr) future_state<T...>(std::move(state));     // 实际上修改的是 continuation::_state 的值
             make_ready<urgent::yes>();
         }
     }
@@ -1552,6 +1555,7 @@ private:
                         // 这里的 state 已经被设置成了 state::result
                         futurator::satisfy_with_result_of(std::move(pr), [&func, &state] {
                             // 注意，这里调用 func 时传入的参数是 state::_v, 该变量是在旧的 promise 执行 set_value 的时候被创建的
+                            // 注意: state::_v 的值主要是用来在多个异步任务之间进行参数传递的. 比如 then(func_1).then(func_2) 中, func_1 的返回值作为 func_2 参数
                             return ::seastar::apply(std::forward<Func>(func), std::move(state).get_value());
                         });
                     }
@@ -1702,7 +1706,7 @@ private:
     {
         if (_state.available())
         {
-            pr.set_urgent_state(std::move(_state));
+            pr.set_urgent_state(std::move(_state));     // 将当前 future::_state 的值移动给了 promise_base::_state.(包含 _state::_v 和 _state::_u)
         }
         else
         {
@@ -2129,9 +2133,9 @@ void futurize<future<Args...>>::satisfy_with_result_of(internal::promise_base_wi
     /**
      * 以下链式调用的执行过程分析:
      * 1. func() 内部是多个 lambda 表达式的递归调用，内部调用结果如上.
-     * 2. func() 返回的 future 是在 func_1() 调用中已经就绪的 future
-     * 3. 使用 func() 返回的已经就绪的 future (future->_state == state::result) 来调用 forward_to, forward_to 内部会执行两个步骤:
-     *   3.1 用 future->_state 初始化 pr->_state. 也就是说 pr 的 _state 也被设置成了 state::result. 然后这个已经就绪的 future 就没有其他作用了
+     * 2. func() 返回的 future 是在 func_1() 调用中已经就绪的 future. 注意: 这个 future::_state 的 _u 和 _v 参数都已经被赋值了
+     * 3. 使用 func() 返回的已经就绪的 future 来调用 forward_to, forward_to 内部会执行两个步骤:
+     *   3.1 用 future->_state 给 pr->_state 赋值. 注意: 这时 promsie 的 _state 指向的是 continuation_base::_state. 也就是说, 实际上 continuation_base 的 _state 被设置成了 future::_state(包含 _state::_u 和 _state::_v). 然后这里的 future 就没有其他作用了.
      *   3.2 在 make_ready 接口中将 promise 上绑定的 _task 递交给 reactor 去执行.
      *
      * 这里 promise 中的 _task 是在什么时候被赋值的?
