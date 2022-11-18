@@ -4074,6 +4074,7 @@ void smp::configure(boost::program_options::variables_map configuration, reactor
      * seastar 对内存按照启动线程的数量进行了分片，每个线程都预先分配了一大块内存(在它运行的同一个 NUMA 节点上), 每个线程会使用自己的内存进行分配.
      *
      * 为了实现这种预分配, seastar 重写了 malloc/free/new/delete/calloc/realloc 等所有内存分配的方法. 实现在 memory.cc 中
+     * 每个 cpu 通过 memory::configure 绑定到不同的内存地址
      */
 
     // 调用 hwloc 的接口，获取 cpu 拓扑信息，然后将操作系统的内存空间按照 CPU 核数分为相同的若干份

@@ -205,7 +205,12 @@ static char* mem_base() {
     static char* known;
     static std::once_flag flag;
     std::call_once(flag, [] {
+        // 对于一个 32 位系统来说，操作系统为每个进程分配的虚拟地址空间大小为 2^32 = 4GB; 但是对于 64 位系统来说，虚拟地址空间的大小为 2^48 = 256TB
+        // 这里通过 mmap 为当前进程分配的虚拟内存大小为 2^44 * 2 = 32TB
+        // 补充: 虽然实际的物理内存可能没有 32TB 这么大, 但是 OS 可以通过虚拟技术将在这 32TB 虚拟内存上的操作映射到实际的物理内存上. 比如分页、分段、LRU 等算法
         size_t alloc = size_t(1) << 44;
+        // 创建匿名内存映射，实际上只是分配了虚拟内存，并没有分配物理内存，当第一次访问这里的虚拟内存的时候，才会通过缺页异常来分配物理页面，建立和虚拟内存页面的映射关系
+        // 匿名内存映射的主要作用是用户引用了一个只读的匿名页面，并没有进行写操作，缺页中断处理的时候，内核也不会给用户进程分配新的物理内存页，都会映射到这个只读的匿名页面，从而节约内存空间
         auto r = ::mmap(NULL, 2 * alloc,
                     PROT_NONE,
                     MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE,
@@ -1362,7 +1367,7 @@ void configure(std::vector<resource::memory> m, bool mbind,
     for (auto&& x : m) {
         total += x.bytes;
     }
-    allocate_system_memory_fn sys_alloc = allocate_anonymous_memory;
+    allocate_system_memory_fn sys_alloc = allocate_anonymous_memory;        // 重新调整在 cpu_pages::initialize() 中映射的内存
     if (hugetlbfs_path) {
         // std::function is copyable, but file_desc is not, so we must use
         // a shared_ptr to allow sys_alloc to be copied around
@@ -1378,6 +1383,9 @@ void configure(std::vector<resource::memory> m, bool mbind,
 #ifdef SEASTAR_HAVE_NUMA
         unsigned long nodemask = 1UL << x.nodeid;
         if (mbind) {
+            // 指定具体的内存分配策略（malloc 分配的只是虚拟内存页面，但是这个虚拟内存页面并没有分配对应的物理内存页。当进程访问相应的虚拟内存地址的时候，内核会发现该虚拟页面没有对应的物理内存页, 此时才会分配物理内存页. 分配物理内存页面的准则是根据访问该内存页面的进程所在的 NUMA 节点的内存分配策略来决定的）
+            // mbind 指定了从 cpu_mem.mem() 地址开始的持续 x.bytes 个字节的内存范围，内存分配策略从哪个节点开始分配内存
+            // cpu_mem.mem() 表示的是虚拟内存地址，当应用程序访问这个范围内的内存时，内核会按照设置的策略在对应的节点分配物理内存
             auto r = ::mbind(cpu_mem.mem() + pos, x.bytes,
                             MPOL_PREFERRED,
                             &nodemask, std::numeric_limits<unsigned long>::digits,
