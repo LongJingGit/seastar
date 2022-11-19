@@ -918,8 +918,8 @@ bool cpu_pages::initialize() {
     cpu_id = cpu_id_gen.fetch_add(1, std::memory_order_relaxed);
     assert(cpu_id < max_cpus);
     all_cpus[cpu_id] = this;
-    auto base = mem_base() + (size_t(cpu_id) << cpu_id_shift);
-    auto size = 32 << 20;  // Small size for bootstrap
+    auto base = mem_base() + (size_t(cpu_id) << cpu_id_shift);      // 每个 cpu 分配 64GB 虚拟内存，但是还无法访问
+    auto size = 32 << 20;  // Small size for bootstrap. 将虚拟内存的前 32M 设置为可读写
     auto r = ::mmap(base, size,
             PROT_READ | PROT_WRITE,
             MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED,
@@ -987,7 +987,7 @@ void cpu_pages::do_resize(size_t new_size, allocate_system_memory_fn alloc_sys_m
     auto old_size = nr_pages * page_size;
     auto mmap_start = memory + old_size;
     auto mmap_size = new_size - old_size;
-    auto mem = alloc_sys_mem(mmap_start, mmap_size);
+    auto mem = alloc_sys_mem(mmap_start, mmap_size);    // 设置虚拟内存为可读写状态
     mem.release();
     ::madvise(mmap_start, mmap_size, MADV_HUGEPAGE);
     // one past last page structure is a sentinel
@@ -1361,13 +1361,15 @@ void disable_large_allocation_warning() {
     cpu_mem.large_allocation_warning_threshold = std::numeric_limits<size_t>::max();
 }
 
+// NOTE: 每个线程都会调用到该接口
 void configure(std::vector<resource::memory> m, bool mbind,
         optional<std::string> hugetlbfs_path) {
     size_t total = 0;
     for (auto&& x : m) {
         total += x.bytes;
     }
-    allocate_system_memory_fn sys_alloc = allocate_anonymous_memory;        // 重新调整在 cpu_pages::initialize() 中映射的内存
+    // cpu_pages::initialize() 中分配的64GB虚拟内存除了前32M之外，其他部分是不可访问的，所以这里修改其他部分虚拟内存的读写状态
+    allocate_system_memory_fn sys_alloc = allocate_anonymous_memory;
     if (hugetlbfs_path) {
         // std::function is copyable, but file_desc is not, so we must use
         // a shared_ptr to allow sys_alloc to be copied around
@@ -1377,15 +1379,22 @@ void configure(std::vector<resource::memory> m, bool mbind,
         };
         cpu_mem.replace_memory_backing(sys_alloc);
     }
-    cpu_mem.resize(total, sys_alloc);
+    cpu_mem.resize(total, sys_alloc);       // 计算实际需要的虚拟内存大小，并通过调用 allocate_anonymous_memory 修改虚拟内存的读写状态
     size_t pos = 0;
     for (auto&& x : m) {
 #ifdef SEASTAR_HAVE_NUMA
+        /**
+         * 每个 NUMA 节点上的 cpu 优先在自己的 NUMA 节点上分配内存. 比如:
+         * 1. NUMA node 0 上有4个 cpu(x.nodeid==0), 这4个 cpu 有各自的虚拟内存(cpu_mem.mem()). 当运行在这4个 cpu 上的线程需要分配物理内存时，内核会优先在 NUMA node 0 的内存节点上进行分配;
+         * 2. 同理，NUMA node 1 上也有 4 个 cpu(x.nodeid==1), 当这4个cpu上的线程需要分配物理内存时，内核会优先在 NUMA node 1 的内存节点上进行分配.
+         */
         unsigned long nodemask = 1UL << x.nodeid;
         if (mbind) {
             // 指定具体的内存分配策略（malloc 分配的只是虚拟内存页面，但是这个虚拟内存页面并没有分配对应的物理内存页。当进程访问相应的虚拟内存地址的时候，内核会发现该虚拟页面没有对应的物理内存页, 此时才会分配物理内存页. 分配物理内存页面的准则是根据访问该内存页面的进程所在的 NUMA 节点的内存分配策略来决定的）
             // mbind 指定了从 cpu_mem.mem() 地址开始的持续 x.bytes 个字节的内存范围，内存分配策略从哪个节点开始分配内存
-            // cpu_mem.mem() 表示的是虚拟内存地址，当应用程序访问这个范围内的内存时，内核会按照设置的策略在对应的节点分配物理内存
+            // cpu_mem.mem(): 虚拟内存起始地址. 在 cpu_pages::initialize() 中确定的，每个 cpu 对应的虚拟内存的起始地址不同
+            // x.bytes: 实际用到的虚拟内存的大小. x.bytes 是通过调用 hwloc 接口将服务器上剩余可用的物理内存按照cpu数量等分之后的大小. 也就是说，即使在 cpu_pages::initialize 中为每个 cpu 分配了64GB的虚拟内存，但实际上，每个 cpu 能够访问的虚拟内存大小只有 x.bytes 字节.(通过 allocate_anonymous_memory 接口设置为可读写状态)
+            // 疑问：将cpu可以访问的虚拟内存和物理内存的大小保持一致，这样是否可以减少虚拟内存大于物理内存时引起的内存换页等？
             auto r = ::mbind(cpu_mem.mem() + pos, x.bytes,
                             MPOL_PREFERRED,
                             &nodemask, std::numeric_limits<unsigned long>::digits,
