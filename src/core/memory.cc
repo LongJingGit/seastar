@@ -205,11 +205,11 @@ static char* mem_base() {
     static char* known;
     static std::once_flag flag;
     std::call_once(flag, [] {
-        // 对于一个 32 位系统来说，操作系统为每个进程分配的虚拟地址空间大小为 2^32 = 4GB; 但是对于 64 位系统来说，虚拟地址空间的大小为 2^48 = 256TB
-        // 这里通过 mmap 为当前进程分配的虚拟内存大小为 2^44 * 2 = 32TB
-        // 补充: 虽然实际的物理内存可能没有 32TB 这么大, 但是 OS 可以通过虚拟技术将在这 32TB 虚拟内存上的操作映射到实际的物理内存上. 比如分页、分段、LRU 等算法
+        /**
+         * 这里通过 mmap 向操作系统申请了 2^44 * 2 = 32TB 的虚拟内存，并没有分配物理内存, 同时将虚拟内存设置为不可读写. 当第一次访问这里的虚拟内存的时候，才会通过缺页异常来分配物理页面，建立和虚拟内存页面的映射关系
+         * 补充: 对于一个 32 位系统来说，操作系统为每个进程分配的虚拟地址空间大小为 2^32 = 4GB; 但是对于 64 位系统来说，虚拟地址空间的大小为 2^48 = 256TB. 虽然实际的物理内存可能没有 256TB 这么大, 但是 OS 可以通过虚拟技术将在这 256TB 虚拟内存上的操作映射到实际的物理内存上. 比如分页、分段、LRU 等算法.
+         */
         size_t alloc = size_t(1) << 44;
-        // 创建匿名内存映射，实际上只是分配了虚拟内存，并没有分配物理内存，当第一次访问这里的虚拟内存的时候，才会通过缺页异常来分配物理页面，建立和虚拟内存页面的映射关系
         // 匿名内存映射的主要作用是用户引用了一个只读的匿名页面，并没有进行写操作，缺页中断处理的时候，内核也不会给用户进程分配新的物理内存页，都会映射到这个只读的匿名页面，从而节约内存空间
         auto r = ::mmap(NULL, 2 * alloc,
                     PROT_NONE,
@@ -918,8 +918,12 @@ bool cpu_pages::initialize() {
     cpu_id = cpu_id_gen.fetch_add(1, std::memory_order_relaxed);
     assert(cpu_id < max_cpus);
     all_cpus[cpu_id] = this;
-    auto base = mem_base() + (size_t(cpu_id) << cpu_id_shift);      // 每个 cpu 分配 64GB 虚拟内存，但是还无法访问
-    auto size = 32 << 20;  // Small size for bootstrap. 将虚拟内存的前 32M 设置为可读写
+    /**
+     * mem_base() 中向操作系统申请了 32TB 的虚拟内存，并且设置成了不可读写状态.
+     * mem_base() + (size_t(cpu_id) << cpu_id_shift) 操作就是为每一个 CPU 从 32TB 的虚拟内存中划分出来一块 64GB 的虚拟地址空间(此时每个 cpu 的虚拟地址空间都是不可读写的, 在 configure 接口中由每个线程将自己拥有的那部分虚拟地址空间设置为私有的和可读写的).
+     */
+    auto base = mem_base() + (size_t(cpu_id) << cpu_id_shift);
+    auto size = 32 << 20;  // Small size for bootstrap. 将虚拟内存的前 32M 设置为可读写, 用于 bootstrap
     auto r = ::mmap(base, size,
             PROT_READ | PROT_WRITE,
             MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED,
@@ -1368,7 +1372,7 @@ void configure(std::vector<resource::memory> m, bool mbind,
     for (auto&& x : m) {
         total += x.bytes;
     }
-    // cpu_pages::initialize() 中分配的64GB虚拟内存除了前32M之外，其他部分是不可访问的，所以这里修改其他部分虚拟内存的读写状态
+    // cpu_pages::initialize() 中分配的64GB虚拟内存除了前32M之外，其他部分是不可访问的. 每个线程会通过调用 configure 接口修改自己拥有的部分虚拟地址空间的读写状态, 并将其设置为私有的，线程可以独占使用
     allocate_system_memory_fn sys_alloc = allocate_anonymous_memory;
     if (hugetlbfs_path) {
         // std::function is copyable, but file_desc is not, so we must use
