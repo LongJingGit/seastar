@@ -32,12 +32,16 @@ namespace seastar {
 /// extended (and shrunk) from both ends. Implementation is a single
 /// storage vector.
 ///
+/// 可增长的双端队列容器，可以从两端有效地扩展(和收缩)。实现是一个单一的存储向量。
+///
 /// Similar to libstdc++'s std::deque, except that it uses a single
 /// level store, and so is more efficient for simple stored items.
 /// Similar to boost::circular_buffer_space_optimized, except it uses
 /// uninitialized storage for unoccupied elements (and thus move/copy
 /// constructors instead of move/copy assignments, which are less
 /// efficient).
+///
+/// 类似于 libstdc++ 的 std::deque, 不同之处在于它使用单层存储，因此对于简单的存储项更有效。类似于 boost::circular_buffer_space_optimized, 只不过它对未占用的元素使用未初始化的存储(因此使用了移动/拷贝构造函数而不是移动/拷贝赋值，后者效率较低)。
 ///
 /// The storage of the circular_buffer is expanded automatically in
 /// exponential increments.

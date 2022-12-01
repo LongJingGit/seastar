@@ -66,7 +66,7 @@ struct io_queue_topology {
 
 struct cpu {
     unsigned cpu_id; // 实际的 cpu index. 将超线程计算在内. 比如 1 个 NUMA node 有两个 cpu, 每个 cpu 开启了超线程, 所以可以认为共有 4 个 cpu core, 这里的 cpu_id 就为 0-3
-    std::vector<memory> mem;
+    std::vector<memory> mem;       // 疑问: 一个 cpu 会对应多个 memory 吗, 为什么这里要用 vector? 一个 cpu 不可能同时属于多个 NUMA node
 };
 
 struct resources {

@@ -44,10 +44,16 @@ namespace seastar {
 // exponentially, when the queue grows. On one test of several different
 // push/pop scenarios, circular_buffer<> was between 5 and 20 times faster
 // than std::list, and also used considerably less memory.
+//
+// std::list 也可以实现上述所有保证，在运行速度(每个操作都需要分配)和内存使用方面效率很低。比 std::list 更有效的是我们的 circular_buffer. 它分配一个连续数组来保存项，并且只在队列增长时以指数方式重新分配它。在几个不同的 push/pop 场景的测试中, circular_buffer 比 std::list 快 5 到 20 倍，而且使用的内存也少得多
+//
 // The problem with circular_buffer<> is that gives up on the last guarantee
 // we made above: circular_buffer<> allocates all the items in one large
 // contiguous allocation - that might not be possible when the memory is
 // highly fragmented.
+//
+// circular_buffer 的问题就是放弃了我们上面所做的最后一个保证: 在一个大的连续分配中分配所有项 --- 当内存高度碎片化时，这可能是不可能的。
+//
 // std::deque<> aims to solve the contiguous allocation problem by allocating
 // smaller chunks of the queue, and keeping a list of them in an array. This
 // array is necessary to allow for O(1) random access to any element, a
@@ -57,9 +63,15 @@ namespace seastar {
 // exactly 1/64 of the size of circular_buffer<>'s contiguous allocation.
 // So it's an improvement over circular_buffer<>, but not a full solution.
 //
+// std::deque 旨在解决连续分配问题，方法是分配队列中更小的块，并在数组中保存它们的列表。这个数组必须允许O(1)对任何元素的随机访问，这是我们不需要的特性;
+// 但是这个数组本身是连续的, 因此 std::deque 的连续分配仍然是O(N)，实际上正好是 circular_buffer 的连续分配大小的 1/64。
+// 因此它是对 circular_buffer 的改进，但不是一个完整的解决方案。
+//
 // chunked_fifo<> is such a solution: it also allocates the queue in fixed-
 // size chunks (just like std::deque) but holds them in a linked list, not
 // a contiguous array, so there are no large contiguous allocations.
+//
+// chunked_fifo 就是这样一种解决方案: 它还以固定大小的块分配队列(就像std::deque)，但将它们保存在一个链表中，而不是一个连续数组中，因此没有大的连续分配。
 //
 // Unlike std::deque<> or circular_buffer<>, chunked_fifo only provides the
 // operations needed by std::queue, i.e.,: empty(), size(), front(), back(),
@@ -70,6 +82,9 @@ namespace seastar {
 // of the queue's elements without popping them, a feature which std::queue
 // is missing.
 //
+// 与 std::deque 或 circular_buffer 不同，chunked_fifo 只提供 std::queue 所需的操作. 即 empty()/size()/front()/back()/push_back()/pop_front().
+// 为了简单起见，我们不实现其他可能的操作，如从队列的“错误”一侧或中间插入或删除元素，也不随机访问队列中间的项。然而, chunked_fifo 确实允许迭代所有队列的元素而不弹出它们，这是 std::queue 所缺少的特性。
+//
 // Another feature of chunked_fifo which std::deque is missing is the ability
 // to control the chunk size, as a template parameter. In std::deque the
 // chunk size is undocumented and fixed - in gcc, it is always 512 bytes.
@@ -78,9 +93,12 @@ namespace seastar {
 // expected to become very long, using a larger chunk size might make sense
 // because it will result in fewer allocations.
 //
+// std::deque 缺少的 chunked_fifo 的另一个特性是控制块大小的能力，作为模板参数。在 std::deque 中，块大小是没有文档记录的，并且是固定的，而在 gcc 中，它总是 512 字节。另一方面，chunked_fifo 将块大小(以项数而不是字节数为单位)作为模板参数; 在队列预计将变得非常长的情况下，使用更大的块大小可能是有意义的，因为它将导致更少的分配。
+//
 // chunked_fifo uses uninitialized storage for unoccupied elements, and thus
 // uses move/copy constructors instead of move/copy assignments, which are
 // less efficient.
+// chunked_fifo 对未占用的元素使用未初始化存储，因此使用移动/复制构造函数而不是移动/复制赋值，后者效率较低。
 
 template <typename T, size_t items_per_chunk = 128>
 class chunked_fifo {
