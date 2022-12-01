@@ -1227,7 +1227,7 @@ Note that `when_all()` accept only rvalues, which can be temporaries (like the r
 
 The future returned by `when_all()` resolves to a tuple of futures which are already resolved, and contain the results of the three input futures. Continuing the above example,
 
-> 由 `when_all()` 返回的 `future` 为已解析的 `future` 元组，并包含三个输入 `future` 的结果。继续上面的例子，
+> 由 `when_all()` 返回的 `future` 为已经就绪的 `future` 元组，并包含三个输入 `future` 的结果。继续上面的例子，
 
 ```cpp
 future<> f() {
@@ -1249,7 +1249,7 @@ The output of this program (which comes after two seconds) is `1, 2, 3.5`: the f
 
 One or more of the waited futures might resolve in an exception, but this does not change how `when_all()` works: It still waits for all the futures to resolve, each with either a value or an exception, and in the returned tuple some of the futures may contain an exception instead of a value. For example,
 
-> 一个或多个等待的 `future` 可能会在异常中解决，但这不会改变 `when_all()` 工作方式：它仍然等待所有 future 解决，每个 future 都有一个值或一个异常，并且在返回的元组中，一些 future 可能包含异常而不是值。例如，
+> 一个或多个等待的 `future` 可能会在异常中就绪，但这不会改变 `when_all()` 工作方式：它仍然等待所有 future 就绪，每个 future 都有一个值或一个异常，并且在返回的元组中，一些 future 可能包含异常而不是值。例如，
 
 ```cpp
 future<> f() {
@@ -1267,15 +1267,15 @@ future<> f() {
 
 Both futures are `available()` (resolved), but the second has `failed()` (resulted in an exception instead of a value). Note how we called `ignore_ready_future()` on this failed future, because silently ignoring a failed future is considered a bug, and will result in an "Exceptional future ignored" error message. More typically, an application will log the failed future instead of ignoring it.
 
-> 两个 `future` 都 `available()`（已解决），但第二个 `failed()`（导致异常而不是值）。注意我们如何在这个失败的 `future` 上调用 `ignore_ready_future()`，因为默默地忽略失败的 `future` 被认为是一个错误，并将导致 "Exceptional future ignored" 错误消息。更典型的是，应用程序将记录失败的 `future` 而不是忽略它。
+> 两个 `future` 都 `available()`（已就绪），但第二个 `failed()`（异常而不是值）。注意我们如何在这个失败的 `future` 上调用 `ignore_ready_future()`，因为默默地忽略失败的 `future` 被认为是一个错误，并将导致 "Exceptional future ignored" 错误消息。更典型的是，应用程序将记录失败的 `future` 而不是忽略它。
 
 The above example demonstrate that `when_all()` is inconvenient and verbose to use properly. The results are wrapped in a tuple, leading to verbose tuple syntax, and uses ready futures which must all be inspected individually for an exception to avoid error messages. 
 
-> 上面的例子表明正确使用 `when_all()` 是不方便和冗长的。结果被包装在一个元组中，导致冗长的元组语法，使用就绪的 `future`，必须单独检查所有的异常以避免错误消息。
+> 上面的例子表明正确使用 `when_all()` 是不方便和冗长的。结果被包装在一个元组中，导致冗长的元组语法，要获取所有就绪的 `future`，必须单独检查所有的异常以避免错误消息。
 
 So Seastar also provides an easier to use `when_all_succeed()` function. This function too returns a future which resolves when all the given futures have resolved. If all of them succeeded, it passes the resulting values to continuation, without wrapping them in futures or a tuple. If, however, one or more of the futures failed, `when_all_succeed()` resolves to a failed future, containing the exception from one of the failed futures. If more than one of the given future failed, one of those will be passed on (it is unspecified which one is chosen), and the rest will be silently ignored. For example,
 
-> 所以 Seastar 也提供了一个更容易使用的 `when_all_succeed()` 方法。此函数也返回一个 future，当所有给定的 future 都已解决时，该 future 将解决。如果它们都成功了，它将结果值传递给 `continuation`，而不将它们包装在 `future` 或元组中。但是如果一个或多个 `future` 失败，则 `when_all_succeed()` 解析为失败的 `future`，其中包含来自失败 `future` 之一的异常。如果给定的 `future` 不止一个失败，其中一个将被传递（未指定选择哪一个），其余的将被静默忽略。例如，
+> 所以 Seastar 也提供了一个更容易使用的 `when_all_succeed()` 方法。此函数也返回一个 future，当所有给定的 future 都已经就绪时，该 future 将就绪。如果它们都成功了，它将结果值传递给 continuation, 而不将它们包装在 future 或元组中。但是如果一个或多个 future 失败，则 `when_all_succeed()` 解析为失败的 future, 其中包含来自失败 `future` 之一的异常。如果给定的 `future` 不止一个失败，其中一个将被传递（未指定选择哪一个），其余的将被静默忽略。例如，
 
 ```cpp
 using namespace seastar;
@@ -1291,7 +1291,7 @@ future<> f() {
 
 Note how the integer and double values held by the futures are conveniently passed, individually (without a tuple) to the continuation. Since `sleep()` does not contain a value, it is waited for, but no third value is passed to the continuation. That also means that if we `when_all_succeed()` on several `future<>` (without a value), the result is also a `future<>`:
 
-> 请注意，`future` 持有的整数和双精度值是如何方便地单独（没有使用元组）传递给 `continuation` 的。由于 `sleep()` 不包含值，因此等待它，但没有第三个值传递给 `continuation`。这也意味着如果我们 `when_all_succeed()` 对几个future<>（没有值），结果也是一个future<>：
+> 请注意，future 持有的整数和双精度值是如何方便地单独（没有使用元组）传递给 continuation 的。由于 `sleep()` 不包含值，因此没有值传递给 continuation。这也意味着在几个没有值的 `future<>` 上执行 `when_all_succeed()`, 结果也是一个 `future<>`:
 
 ```cpp
 using namespace seastar;
@@ -1325,12 +1325,16 @@ future<> f() {
 
 In this example, one of the futures fails, so the result of `when_all_succeed` is a failed future, so the normal continuation is not run, and the `handle_exception()` continuation is done.
 
-> 在这个例子中，有一个 future 失败了，所以 `when_all_succeed` 的结果是一个失败的 future，因此正常的 continuation 没有运行，`handle_exception()` `continuation` 就完成了。
+> 在这个例子中，有一个 future 失败了，所以 `when_all_succeed` 的结果是一个失败的 future，因此正常的 continuation 没有运行，而是运行 `handle_exception()` 的 `continuation` 。
 
 TODO: also explain `when_all` and `when_all_succeed` for vectors.
 
+> TODO: 解释 vector 的 `when_all` 和 `when_all_succeed`.
+
 # Semaphores
 Seastar's semaphores are the standard computer-science semaphores, adapted for futures. A semaphore is a counter into which you can deposit units or take them away. Taking units from the counter may wait if not enough units are available.
+
+> Seastar 的信号量是标准的计算机科学信号量，适用于 `future`。信号量是一个计数器，你可以在其中存放或取走单元。如果没有足够的单元可用，从计数器取单元可能会等待。
 
 ## Limiting parallelism with semaphores
 The most common use for a semaphore in Seastar is for limiting parallelism, i.e., limiting the number of instances of some code which can run in parallel. This can be important when each of the parallel invocations uses a limited resource (e.g., memory) so letting an unlimited number of them run in parallel can exhaust this resource.
@@ -1339,7 +1343,7 @@ The most common use for a semaphore in Seastar is for limiting parallelism, i.e.
 
 Consider a case where an external source of events (e.g., an incoming network request) causes an asynchronous function ```g()``` to be called. Imagine that we want to limit the number of concurrent ```g()``` operations to 100. I.e., If g() is started when 100 other invocations are still ongoing, we want it to delay its real work until one of the other invocations has completed. We can do this with a semaphore:
 
-> 考虑一个外部事件源(例如，传入的网络请求)导致调用异步函数 `g()` 的情况。假设我们希望将并发的 `g()` 操作的数量限制为 100 个。也就是说，如果 g() 在 100 个其他调用仍在进行时启动，我们希望它延迟它的实际工作，直到其中一个其他调用完成。我们可以通过一个信号量来做到这一点:
+> 考虑一个外部事件(例如，传入的网络请求)导致调用异步函数 `g()` 的情况。假设我们希望将并发执行 `g()` 的数量限制为 100。也就是说，如果已经有 100 个 g() 调用在运行，再启动一个新的 g() 调用，我们希望它延迟它的实际工作，直到其中一个其他调用完成。那么可以通过一个信号量来做到这一点:
 
 ```cpp
 seastar::future<> g() {
@@ -1354,15 +1358,15 @@ seastar::future<> g() {
 
 In this example, the semaphore starts with the counter at 100. The asynchronous operation `slow()` is only started when we can reduce the counter by one (`wait(1)`), and when `slow()` is done, either successfully or with exception, the counter is increased back by one (```signal(1)```). This way, when 100 operations have already started their work and have not yet finished, the 101st operation will wait, until one of the ongoing operations finishes and returns a unit to the semaphore. This ensures that at each time we have at most 100 concurrent `slow()` operations running in the above code.
 
-> 在本例中，信号量从计数器 100 开始。异步操作 `slow()` 只有在计数器减少1(`wait(1)`)时才会启动，当 `slow()` 完成时，无论成功还是异常，计数器都会增加1(`signal(1)`)。这样，当 100 个操作已经开始工作并且还没有结束时，第 101 个操作将等待，直到其中一个正在进行的操作结束并向信号量返回一个单元。这确保了每次我们在上面的代码中最多有 100 个并发的 `slow()` 操作在运行。
+> 在本例中，信号量计数器数量限制为100。异步操作 `slow()` 只有在成功获取到一个信号量（`limit.wait(1)`）之后才会启动，当 `slow()` 完成时，无论成功还是异常，计数器都会增加 1 (`limit.signal(1)`)。这样，当 100 个 `slow()` 操作已经开始工作并且还没有结束时，第 101 个操作将等待，直到其中一个正在进行的操作结束并向信号量计数器返回一个信号量。这确保了每次我们在上面的代码中最多有 100 个并发的 `slow()` 操作在运行。
 
 Note how we used a ```static thread_local``` semaphore, so that all calls to ```g()``` from the same shard count towards the same limit; As usual, a Seastar application is sharded so this limit is separate per shard (CPU thread). This is usually fine, because sharded applications consider resources to be separate per shard.
 
-> 注意我们如何使用 `static thread_local` 信号量，以便从相同的分片计数对 `g()` 的所有调用达到相同的限制; 通常, Seastar 应用程序是分片的，因此每个分片(CPU线程)的限制是独立的。这通常是好的，因为分片应用程序认为每个分片的资源是独立的。
+> 注意我们如何使用 `static thread_local` 信号量，以便使用相同的信号量计数器对 `g()` 的所有调用达到相同的限制; 通常, Seastar 应用程序是分片的，因此每个分片(CPU线程)的限制是独立的。这通常是好的，因为分片应用程序认为每个分片的资源是独立的。
 
 Luckily, the above code happens to be exception safe: `limit.wait(1)` can throw an exception when it runs out of memory (keeping a list of waiters), and in that case the semaphore counter is not decreased but the continuations below are not run so it is not increased either. `limit.wait(1)` can also return an exceptional future when the semaphore is *broken* (we'll discuss this later) but in that case the extra `signal()` call is ignored. Finally, `slow()` may also throw, or return an exceptional future, but the `finally()` ensures the semaphore is still increased.
 
-> 幸运的是，上面的代码碰巧是异常安全的: `limit.wait(1)` 可以在内存耗尽时抛出异常(保持一个等待者列表)，在这种情况下，信号量计数器不会减少，但下面的 continuation 不会运行，所以它也不会增加。`limit.wait(1)` 也可以在信号量 *broken* 时返回异常的 future(稍后讨论)，但在这种情况下额外的 `signal()` 调用会被忽略。最后, `slow()` 也可能抛出或返回异常的 future，但 `finally()` 确保信号量仍然增加。
+> 幸运的是，上面的代码碰巧是异常安全的: `limit.wait(1)` 可以在内存耗尽时抛出异常(维护一个等待者列表)，在这种情况下，信号量计数器不会减少，但下面的 continuation 不会运行，所以它也不会增加。`limit.wait(1)` 也可以在信号量 *broken* 时返回异常的 future(稍后讨论)，但在这种情况下额外的 `signal()` 调用会被忽略。最后, `slow()` 也可能抛出或返回异常的 future，但 `finally()` 确保信号量仍然增加。
 
 However, as the application code becomes more complex, it becomes harder to ensure that we never forget to call `signal()` after the operation is done, regardless of which code path or exceptions happen. As an example of what might go wrong, consider the following *buggy* code snippet, which differs subtly from the above one, and also appears, on first sight, to be correct:
 
@@ -1379,11 +1383,11 @@ seastar::future<> g() {
 
 But this version is **not** exception safe: Consider what happens if `slow()` throws an exception before returning a future (this is different from `slow()` returning an exceptional future - we discussed this difference in the section about exception handling). In this case, we decreased the counter, but the `finally()` will never be reached, and the counter will never be increased back. There is a way to fix this code, by replacing the call to `slow()` with `seastar::futurize_invoke(slow)`. But the point we're trying to make here is not how to fix buggy code, but rather that by using the separate `semaphore::wait()` and `semaphore::signal()` functions, you can very easily get things wrong.
 
-> 但是这个版本不是异常安全的: 考虑一下如果 `slow()` 在返回 future 之前抛出异常会发生什么情况(这与 `slow()` 返回异常 future 不同 -- 我们在关于异常处理的部分讨论了这种差异)。在本例中，我们减少了计数器，但永远不会到达 `finally()`, 计数器也永远不会增加回来。有一个方法可以修复这个代码，用 `seastar::futurize_invoke(slow)` 替换对 `slow()` 的调用。但我们在这里试图说明的重点不是如何修复有bug的代码，而是通过使用单独的 `semaphore::wait()` 和 `semaphore::signal()` 函数，你很容易出错。
+> 但是这个版本不是异常安全的: 考虑一下如果 `slow()` 在返回 future 之前抛出异常会发生什么情况(这与 `slow()` 返回异常 future 不同，我们在关于异常处理的部分讨论了这种差异)。在本例中，我们减少了计数器，但永远不会到达 `finally()`, 计数器也永远不会增加回来。有一个方法可以修复这个代码，用 `seastar::futurize_invoke(slow)` 替换对 `slow()` 的调用。但我们在这里试图说明的重点不是如何修复有 bug 的代码，而是通过使用单独的 `semaphore::wait()` 和 `semaphore::signal()` 函数，你很容易出错。
 
 For exception safety, in C++ it is generally not recommended to have separate resource acquisition and release functions.  Instead, C++ offers safer mechanisms for acquiring a resource (in this case seamphore units) and later releasing it: lambda functions, and RAII ("resource acquisition is initialization"):
 
-> 为了异常安全，在 C++ 中通常不建议使用独立的资源获取和释放函数。相反，C++ 提供了更安全的机制来获取资源(在本例中是 seamphore)并随后释放它: lambda函数和RAII(“资源获取是初始化”):
+> 为了异常安全，在 C++ 中通常不建议使用独立的资源获取和释放函数。相反 C++ 提供了更安全的机制来获取资源(在本例中是 seamphore)并随后释放它: lambda 函数和 RAII(“资源获取是初始化”):
 
 The lambda-based solution is a function ```seastar::with_semaphore()``` which is a shortcut for the code in the examples above:
 
@@ -1400,7 +1404,7 @@ seastar::future<> g() {
 
 `with_semaphore()`, like the earlier code snippets, waits for the given number of units from the semaphore, then runs the given lambda, and when the future returned by the lambda is resolved, `with_semaphore()` returns back the units to the semaphore. `with_semaphore()` returns a future which only resolves after all these steps are done.
 
-> 与前面的代码片段一样, `with_semaphore()` 等待信号量中给定数量的单元，然后运行给定的 lambda. 当 lambda 返回的 future 被解析时, `with_semaphore()` 将单元返回给信号量. `with_semaphore()` 返回一个只有在所有这些步骤完成后才会解决的 future.
+> 与前面的代码片段一样, `with_semaphore()` 等待特定数量的信号量，然后运行 lambda. 当 lambda 返回的 future 就绪时, `with_semaphore()` 将信号量返回给信号量计数器. `with_semaphore()` 返回一个只有在所有这些步骤完成后才会就绪的 future.
 
 The function `seastar::get_units()` is more general. It provides an exception-safe alternative to `seastar::semaphore`'s separate `wait()` and `signal()` methods, based on C++'s RAII philosophy: The function returns an opaque units object, which while held, keeps the semaphore's counter decreased - and as soon as this object is destructed, the counter is increased back. With this interface you cannot forget to increase the counter, or increase it twice, or increase without decreasing: The counter will always be decreased once when the units object is created, and if that succeeded, increased when the object is destructed. When the units object is moved into a continuation, no matter how this continuation ends, when the continuation is destructed, the units object is destructed and the units are returned to the semaphore's counter. The above examples, written with `get_units()`, looks like this:
 
@@ -1417,7 +1421,7 @@ seastar::future<> g() {
 
 Note the somewhat convoluted way that `get_units()` needs to be used: The continuations must be nested because we need the `units` object to be moved to the last continuation. If `slow()` returns a future (and does not throw immediately),  the `finally()` continuation captures the `units` object until everything is done, but does not run any code.
 
-> 注意使用 `get_units()` 的方式有些复杂: continuation 必须嵌套，因为我们需要将 `units` 对象移动到最后一个 continuation. 如果 `slow()` 返回一个 future(并且不立即抛出), `finally()` 延续会捕获 `units` 对象，直到一切都完成，但不运行任何代码。
+> 注意使用 `get_units()` 的方式有些复杂: continuation 必须嵌套，因为我们需要将 `units` 对象移动到最后一个 continuation. 如果 `slow()` 返回一个 future(不抛异常), `finally()` continuation 会捕获 `units` 对象，直到一切都完成，但不运行任何代码。
 
 Seastars programmers should generally avoid using the the `seamphore::wait()` and `semaphore::signal()` functions directly, and always prefer either `with_semaphore()` (when applicable) or `get_units()`.
 
@@ -1427,7 +1431,7 @@ Seastars programmers should generally avoid using the the `seamphore::wait()` an
 ## Limiting resource use
 Because semaphores support waiting for any number of units, not just 1, we can use them for more than simple limiting of the *number* of parallel invocation. For example, consider we have an asynchronous function ```using_lots_of_memory(size_t bytes)```, which uses ```bytes``` bytes of memory, and we want to ensure that not more than 1 MB of memory is used by all parallel invocations of this function --- and that additional calls are delayed until previous calls have finished. We can do this with a semaphore:
 
-> 因为 semaphores 支持等待任意数量的单元，而不仅仅是等待1个单元，所以我们可以将它们用于多种用途，而不仅仅是简单地限制并行调用的数量。例如，考虑我们有一个异步函数 `using_lots_of_memory(size_t bytes)`, 它使用 `bytes` 字节的内存，我们希望确保该函数的所有并行调用使用的内存不超过 1mb, 并且额外的调用被延迟到之前的调用结束。我们可以通过一个信号量来做到这一点:
+> 因为 semaphores 支持等待任意数量的单元，而不仅仅是等待 1 个单元，所以我们可以将它们用于多种用途，而不仅仅是简单地限制并行调用的数量。例如，考虑我们有一个异步函数 `using_lots_of_memory(size_t bytes)`, 它使用 `bytes` 字节的内存，我们希望确保该函数的所有并行调用使用的内存不超过 1mb, 并且额外的调用被延迟到之前的调用结束。我们可以通过信号量来做到这一点:
 
 ```cpp
 seastar::future<> using_lots_of_memory(size_t bytes) {
@@ -1440,7 +1444,7 @@ seastar::future<> using_lots_of_memory(size_t bytes) {
 
 Watch out that in the above example, a call to `using_lots_of_memory(2000000)` will return a future that never resolves, because the semaphore will never contain enough units to satisfy the semaphore wait. `using_lots_of_memory()` should probably check whether `bytes` is above the limit, and throw an exception in that case. Seastar doesn't do this for you.
 
-> 注意，在上面的例子中，对 `using_lots_of_memory(2000000)` 的调用将返回一个永远不会解析的 future, 因为信号量永远不会包含足够的单元来满足信号量等待。`using_lots_of_memory()` 可能应该检查 `bytes` 是否超过限制，并在这种情况下抛出异常。Seastar 不会为你做这些。
+> 注意，在上面的例子中，对 `using_lots_of_memory(2000000)` 的调用将返回一个永远不会就绪的 future, 因为信号量永远不会包含足够的单元来满足信号量等待。`using_lots_of_memory()` 可能应该检查 `bytes` 是否超过限制，并在这种情况下抛出异常。Seastar 不会为你做这些。
 
 
 ## Limiting parallelism of loops
@@ -1469,7 +1473,7 @@ This loop runs the ```slow()``` function (taking one second to complete) without
 
 Naively, we could achieve more parallelism, by starting the next call to ```slow()``` right after the previous call --- ignoring the future returned by the previous call to ```slow()``` and not waiting for it to resolve:
 
-> 我们可以通过在前一个调用之后开始下一个对 `slow()` 的调用来获得更多的并行性 --- 忽略前一个对 `slow()` 的调用所返回的 future，而不等待它的解析.
+> 我们可以在前一个调用之后开始下一个对 `slow()` 的调用来获得更多的并行性 --- 忽略前一个对 `slow()` 的调用所返回的 future，而不等待它就绪.
 
 ```cpp
 seastar::future<> f() {
@@ -1602,7 +1606,7 @@ Seastar's `pipe<T>` is a mechanism to transfer data between two fibers, one prod
 
 A `pipe<T>` resembles a Unix pipe, in that it has a read side, a write side, and a fixed-sized buffer between them, and supports either end to be closed independently (and EOF or broken pipe when using the other side). A `pipe<T>` object holds the reader and write sides of the pipe as two separate objects. These objects can be moved into two different fibers.  Importantly, if one of the pipe ends is destroyed (i.e., the continuations capturing it end), the other end of the pipe will stop blocking, so the other fiber will not hang.
 
-> `pipe<T>` 类似于 Unix 管道，它有读端、写端，它们之间有一个固定大小的缓冲区，并支持任意一端独立关闭(使用另一端时支持 EOF 或破裂的管道)。`pipe<T>` 对象保存 reader，并将管道的两端作为两个单独的对象写入。这些物体可以被移动到两种不同的纤维中。重要的是，如果管道的一端被破坏了(即，捕获该一端的延续)，管道的另一端将停止阻塞，因此另一端的纤维将不会悬挂。
+> `pipe<T>` 类似于 Unix 管道，它有读端、写端，它们之间有一个固定大小的缓冲区，并支持任意一端独立关闭(使用另一端时支持 EOF 或破裂的管道)。`pipe<T>` 对象保存 reader，并将管道的两端作为两个单独的对象写入。这些物体可以被移动到两种不同的 fibers 中。重要的是，如果管道的一端被破坏了(即，捕获该一端的延续)，管道的另一端将停止阻塞，因此另一端的 fiber 将不会挂起。
 
 The pipe's read and write interfaces are future-based blocking. I.e., the write() and read() methods return a future which is fulfilled when the operation is complete. The pipe is single-reader single-writer, meaning that until the future returned by read() is fulfilled, read() must not be called again (and same for write).
 
@@ -1615,13 +1619,20 @@ Note: The pipe reader and writer are movable, but *not* copyable. It is often co
 # Shutting down a service with a gate
 Consider an application which has some long operation `slow()`, and many such operations may be started at any time. A number of `slow()` operations may even even be active in parallel.  Now, you want to shut down this service, but want to make sure that before that, all outstanding operations are completed. Moreover, you don't want to allow new `slow()` operations to start while the shut-down is in progress.
 
+> 考虑一个应用程序，它有一些长时间的 `slow()` 操作，并且许多这样的操作可能在任何时候启动。许多 `slow()` 操作甚至可能是并行运行的。现在你想要关闭该服务，但希望在关闭该服务之前，所有未完成的操作都已完成。此外，不允许在关闭过程中启动新的 `slow()`操作。
+
 This is the purpose of a `seastar::gate`. A gate `g` maintains an internal counter of operations in progress. We call `g.enter()` when entering an operation (i.e., before running `slow()`), and call `g.leave()` when leaving the operation (when a call to `slow()` completed). The method `g.close()` *closes the gate*, which means it forbids any further calls to `g.enter()` (such attempts will generate an exception); Moreover `g.close()` returns a future which resolves when all the existing operations have completed. In other words, when `g.close()` resolves, we know that no more invocations of `slow()` can be in progress - because the ones that already started have completed, and new ones could not have started.
+
+> 这就是 `seastar::gate` 的目的。gate `g` 维护正在进行的操作的内部计数器。我们在进入操作时调用 `g.enter()` (例如，在运行 `slow()` 之前)，在离开操作时调用 `g.leave()` (当调用 `slow()` 完成时)。方法 `g.close()` *close the gate*，这意味着它禁止重新调用 `g.enter()` (这种尝试将生成异常)；此外，`g.close()` 返回当所有现有操作完成时就绪的 future。换句话说，当 `g.close()` 被解析时，我们知道 `slow()` 的调用不能再进行了，因为已经开始的调用已经完成了，新的调用不可能已经开始。
 
 The construct
 ```cpp
 seastar::with_gate(g, [] { return slow(); })
 ```
 can be used as a shortcut to the idiom
+
+> `with_gate` 可以作为上面描述的 `g.enter` 和 `g.leave` 的一种简单实现
+
 ```cpp
 g.enter();
 slow().finally([&g] { g.leave(); });
@@ -1661,7 +1672,12 @@ seastar::future<> f() {
 
 In this example, we have a function `future<> slow()` taking 10 seconds to complete. We run it in a loop 5 times, waiting 1 second between calls, and surround each call with entering and leaving the gate (using `with_gate`). After the 5th call, while all calls are still ongoing (because each takes 10 seconds to complete), we close the gate and wait for it before exiting the program. We also test that new calls cannot begin after closing the gate, by trying to enter the gate again one second after closing it.
 
+> 在这个例子中，我们有一个需要 10 秒才能完成的函数 `future<> slow()`。我们在循环中运行 5 次，在两次调用之间等待 1 秒，并在每个调用周围加上进出的 gate（使用 `with_gate`）。在第 5 次调用之后，虽然所有调用仍在进行中（因为每个调用需要 10 秒才能完成），但我们关闭 `gate` 并等待它退出程序。我们还通过在关闭 gate 后一秒钟尝试再次进入 gate 来测试无法在关闭 gate 后开始新调用。
+
 The output of this program looks like this:
+
+> 该程序的输出如下所示：
+
 ```
 starting 1
 starting 2
@@ -1678,9 +1694,15 @@ done 5
 
 Here, the invocations of `slow()` were started at 1 second intervals. After the "`starting 5`" message, we closed the gate and another attempt to use it resulted in a `seastar::gate_closed_exception`, which we ignored and hence this message. At this point the application waits for the future returned by `g.close()`. This will happen once all the `slow()` invocations have completed: Immediately after printing "`done 5`", the test program stops.
 
+> 在这里， `slow()` 的调用以 1 秒的间隔开始。在 `starting 5` 消息之后，我们关闭了 `gate`，并且再次尝试使用它导致了 `seastar::gate_closed_exception`，我们忽略了它，因此出现了这条消息。此时应用程序等待由 `g.close()` 返回的 `future`。 这将在所有 `slow()` 调用完成后发生：打印 "done 5" 之后，测试程序立即停止.
+
 As explained so far, a gate can prevent new invocations of an operation, and wait for any in-progress operations to complete. However, these in-progress operations may take a very long time to complete. Often, a long operation would like to know that a shut-down has been requested, so it could stop its work prematurely. An operation can check whether its gate was closed by calling the gate's `check()` method: If the gate is already closed, the `check()` method throws an exception (the same `seastar::gate_closed_exception` that `enter()` would throw at that point). The intent is that the exception will cause the operation calling it to stop at this point.
 
+> 如上所述，gate 可以阻止对操作的新调用，并等待任何正在进行的操作完成。然而，这些正在进行的操作可能需要很长时间才能完成。通常，长时间操作希望知道已经请求了关闭，因此它可以提前停止工作。一个操作可以通过调用 gate 的 `check()` 方法来检查它的 gate 是否关闭：如果 gate 已经关闭，`check()` 方法会抛出一个异常（与 `enter()` 一样抛出 `seastar::gate_closed_exception`）。其目的是，异常将导致调用它的操作在此时停止。
+
 In the previous example code, we had an un-interruptible operation `slow()` which slept for 10 seconds. Let's replace it by a loop of 10 one-second sleeps, calling `g.check()` each second:
+
+> 在前面的示例代码中，我们有一个不可中断的操作 `slow()`，它休眠了 10 秒。让我们用 10 个 1 秒休眠的循环来替换它，每秒调用 `g.check()`:
 
 ```cpp
 seastar::future<> slow(int i, seastar::gate &g) {
@@ -1698,6 +1720,8 @@ seastar::future<> slow(int i, seastar::gate &g) {
 
 Now, just one second after gate is closed (after the "starting 5" message is printed), all the `slow()` operations notice the gate was closed, and stop. As expected, the exception stops the `do_for_each()` loop, and the `finally()` continuation is performed so we see the "done" messages for all five operations.
 
+> 现在，在 gate 关闭后仅仅一秒钟(在 "starting 5" 消息打印出来之后)，所有的 `slow()` 操作都通知 gate 关闭并停止。正如预期的那样，异常将停止 ` do_for_each()` 循环，并执行 `finally()` continuation，因此我们将看到所有五个操作的 "done" 消息。
+
 
 # Introducing shared-nothing programming
 
@@ -1714,9 +1738,15 @@ TODO: Talk about polling that we currently do, and how today even sleep() or wai
 
 TODO: Mention the two modes of operation: Posix and native (i.e., take a L2 (Ethernet) interface (vhost or dpdk) and on top of it we built (in Seastar itself) an L3 interface (TCP/IP)).
 
+> TODO: 说明两种操作模式：Posix 和本机(即采用L2(以太网)接口(vhost或dpdk)，并在其之上构建(在Seastar本身中)L3接口(TCP/IP))。
+
 For optimal performance, Seastar's network stack is sharded just like Seastar applications are: each shard (thread) takes responsibility for a different subset of the connections. Each incoming connection is directed to one of the threads, and after a connection is established, it continues to be handled on the same thread.
 
+> 为了获得最佳性能，Seastar 的网络堆栈像 Seastar 应用程序一样被分片：每个分片（线程）负责连接的不同子集。每个传入的连接都指向其中一个线程，在建立连接后，它会继续在同一个线程上处理。
+
 In the examples we saw earlier, `main()` ran our function `f()` only once, on the first thread. Unless the server is run with the `"-c1"` option (one thread only), this will mean that any connection arriving to a different thread will not be handled. So in all the examples below, we will need to run the same service loop on all cores. We can easily do this with the `smp::submit_to` function:
+
+> 在我们之前看到的示例中，`main()` 只在第一个线程上运行了一次我们的函数 `f()`。除非服务器使用 "`-c1`" 选项运行（仅一个线程），否则这将意味着任何到达不同线程的连接都不会被处理。因此，在下面的所有示例中，我们将需要在所有内核上运行相同的服务循环。我们可以使用 `smp::submit_to` 函数轻松做到这一点：
 
 ```cpp
 seastar::future<> service_loop();
@@ -1731,7 +1761,11 @@ seastar::future<> f() {
 
 Here we ask each of Seastar cores (from 0 to `smp::count`-1) to run the same function `service_loop()`. Each of these invocations returns a future, and `f()` will return when all of them have returned (in the examples below, they will never return - we will discuss shutting down services in later sections).
 
+> 在这里，我们要求每个 Seastar 内核（从 0 到 `smp::count`-1）运行相同的函数 `service_loop()`。每一个调用都会返回一个 `future`，`f()` 会在它们全部返回时返回（在下面的示例中，它们永远不会返回，我们将在后面的部分中讨论关闭服务）。
+
 We begin with a simple example of a TCP network server written in Seastar. This server repeatedly accepts connections on TCP port 1234, and returns an empty response:
+
+> 我们从一个用 Seastar 编写的 TCP 网络服务器的简单示例开始。此服务器反复接受 TCP 端口 1234 上的连接，并返回一个空响应：
 
 ```cpp
 #include <seastar/core/seastar.hh>
@@ -1758,7 +1792,16 @@ This code works as follows:
 3. To handle one connection, we call ```listener```'s  ```accept()``` method. This method returns a ```future<connected_socket, socket_address>```, i.e., is eventually resolved with an incoming TCP connection from a client (```connected_socket```) and the client's IP address and port (```socket_address```).
 4. To repeatedly accept new connections, we use the ```keep_doing()``` loop idiom. ```keep_doing()``` runs its lambda parameter over and over, starting the next iteration as soon as the future returned by the previous iteration completes. The iterations only stop if an exception is encountered. The future returned by ```keep_doing()``` itself completes only when the iteration stops (i.e., only on exception).
 
+> 此代码的工作原理如下：
+>
+> 1. `listen()` 调用创建了一个 `server_socket` 对象 `listener`，它侦听 TCP 端口 1234（在任何网络接口上）。
+> 2. 我们使用 `do_with()` 用来确保监听套接字在整个循环中都存在。
+> 3. 为了处理一个连接，我们调用 `listener` 的 `accept()` 方法。该方法返回一个 `future<accept_result>`，即最终通过来自客户端的传入 TCP 连接 ( `accept_result.connection`) 以及客户端的 IP 地址和端口 ( `accept_result.remote_address`) 进行解析。
+> 4. 为了反复接受新的连接，我们使用 `keep_doing()` 。`keep_doing()` 一遍又一遍地运行它的 lambda 参数，一旦上一次迭代返回的 `future` 完成，就开始下一次迭代。只有遇到异常时迭代才会停止。仅当迭代停止时（即仅在异常情况下），`keep_doing()` 返回的 `future` 才会完成。
+
 Output from this server looks like the following example:
+
+> 此服务器的输出类似于以下示例：
 
 ```
 $ ./a.out
@@ -1769,12 +1812,16 @@ Accepted connection from 127.0.0.1:47582
 
 If you run the above example server immediately after killing the previous server, it often fails to start again, complaining that:
 
+> 如果你在杀死之前的服务器后立即运行上面的示例服务器，它经常无法重新启动，会返回下面的错误：
+
 ```
 $ ./a.out
 program failed with uncaught exception: bind: Address already in use
 ```
 
 This happens because by default, Seastar refuses to reuse the local port if there are any vestiges of old connections using that port. In our silly server, because the server is the side which first closes the connection, each connection lingers for a while in the "```TIME_WAIT```" state after being closed, and these prevent ```listen()``` on the same port from succeeding. Luckily, we can give listen an option to work despite these remaining ```TIME_WAIT```. This option is analogous to ```socket(7)```'s ```SO_REUSEADDR``` option:
+
+> 发生这种情况是因为默认情况下，如果使用该端口的旧连接有任何痕迹，Seastar 将拒绝重用本地端口。在我们这种愚蠢的服务器中，由于服务器是最先关闭连接的一方，每个连接在关闭后都会在“`TIME_WAIT`”状态下徘徊一段时间，这些都阻止了在同一个端口上`listen()`的成功。幸运的是，我们可以给listen指定一个选项来忽略这些存在着的`TIME_WAIT`。这个选项类似于`socket(7)`的`SO_REUSEADDR`选项：
 
 ```cpp
     seastar::listen_options lo;
@@ -1784,7 +1831,11 @@ This happens because by default, Seastar refuses to reuse the local port if ther
 
 Most servers will always turn on this ```reuse_address``` listen option. Stevens' book "Unix Network Programming" even says that "All TCP servers should specify this socket option to allow the server to be restarted". Therefore in the future Seastar should probably default to this option being on --- even if for historic reasons this is not the default in Linux's socket API.
 
+> 大多数服务器将始终打开`reuse_address`监听选项。Stevens 的《Unix 网络编程》一书甚至说“所有 TCP 服务器都应指定此套接字选项以允许重新启动服务器”。因此，未来 Seastar 可能应该默认启用此选项 —— 即使出于历史原因，这不是 Linux 套接字 API 中的默认设置。
+
 Let's advance our example server by outputting some canned response to each connection, instead of closing each connection immediately with an empty reply.
+
+> 让我们通过向每个连接输出一些预设响应来推进我们的示例服务器，而不是立即用空回复关闭每个连接。
 
 ```cpp
 #include <seastar/core/seastar.hh>
@@ -1817,9 +1868,15 @@ seastar::future<> service_loop() {
 
 The new part of this code begins by taking the ```connected_socket```'s ```output()```, which returns an ```output_stream<char>``` object. On this output stream ```out``` we can write our response using the ```write()``` method. The simple-looking ```write()``` operation is in fact a complex asynchronous operation behind the scenes,  possibly causing multiple packets to be sent, retransmitted, etc., as needed. ```write()``` returns a future saying when it is ok to ```write()``` again to this output stream; This does not necessarily guarantee that the remote peer received all the data we sent it, but it guarantees that the output stream has enough buffer space (or in the TCP case, there is enough room in the TCP congestion window) to allow another write to begin.
 
+> 这段代码的新部分以`connected_socket`的output()开始，它返回一个`output_stream<char>`对象。在这个输出流`out`上，我们可以使用`write()`方法编写我们的响应。看似简单的`write()`操作，其实是一个复杂的后台异步操作，可能会导致根据需要发送、重传等多个数据包。`write()`返回一个`future`告诉我们什么时候可以再次`write()`到这个输出流；这并不一定保证远程对等方接收到我们发送给它的所有数据，但它保证输出流有足够的缓冲区空间（或者在 TCP 的情况下，TCP 拥塞窗口中有足够的空间）允许另一个写入开始。
+
 After ```write()```ing the response to ```out```, the example code calls ```out.close()``` and waits for the future it returns. This is necessary, because ```write()``` attempts to batch writes so might not have yet written anything to the TCP stack at this point, and only when close() concludes can we be sure that all the data we wrote to the output stream has actually reached the TCP stack --- and only at this point we may finally dispose of the ```out``` and ```s``` objects.
 
+> 在`write()`响应`out`之后，示例代码调用`out.close()`并等待它返回的`future`。这是必要的，因为`write()`尝试批量写入，所以此时可能还没有向 TCP 堆栈写入任何内容，只有当 `close()` 结束时，我们才能确定我们写入输出流的所有数据实际上已经到达 TCP stack —— 只有在这一点上，我们才能最终处理`out`和`s`对象。
+
 Indeed, this server returns the expected response:
+
+> 事实上，这个服务器返回了预期的响应：
 
 ```
 $ telnet localhost 1234
@@ -1830,9 +1887,15 @@ Connection closed by foreign host.
 
 In the above example we only saw writing to the socket. Real servers will also want to read from the socket. The ```connected_socket```'s ```input()``` method returns an ```input_stream<char>``` object which can be used to read from the socket. The simplest way to read from this stream is using the ```read()``` method which returns a future ```temporary_buffer<char>```, containing some more bytes read from the socket --- or an empty buffer when the remote end shut down the connection.
 
+> 在上面的例子中，我们只看到了对套接字的写入。真正的服务器也需要从套接字中读取。`connected_socket`的`input()`方法返回一个可用于从套接字读取的`input_stream<char>`对象。从此流中读取数据的最简单方法是使用`read()`方法，这个方法会返回一个`future``temporary_buffer<char>`，该方法包含从套接字读取的更多字节 —— 或远程端关闭连接时的空缓冲区。
+
 ```temporary_buffer<char>``` is a convenient and safe way to pass around byte buffers that are only needed temporarily (e.g., while processing a request). As soon as this object goes out of scope (by normal return, or exception), the memory it holds gets automatically freed. Ownership of buffer can also be transferred by ```std::move()```ing it. We'll discuss ```temporary_buffer``` in more details in a later section.
 
+> `temporary_buffer<char>`是一种用来传递仅临时需要的字节缓冲区（例如，在处理请求时）的方便且安全的方式。一旦该对象超出范围（通过正常返回或异常），它持有的内存就会自动释放。也可以通过`std::move()` 来转移缓冲区的所有权。我们将在后面的部分中更详细地讨论`temporary_buffer`。
+
 Let's look at a simple example server involving both reads an writes. This is a simple echo server, as described in RFC 862: The server listens for connections from the client, and once a connection is established, any data received is simply sent back - until the client closes the connection.
+
+> 让我们看一个涉及读取和写入的简单示例服务器。这是一个简单的回显服务器，如 RFC 862 中所述：服务器侦听来自客户端的连接，一旦建立连接，接收到的任何数据都会被简单地返回 —— 直到客户端关闭连接。
 
 ```cpp
 #include <seastar/core/seastar.hh>
@@ -1885,21 +1948,37 @@ seastar::future<> service_loop() {
 
 The main function ```service_loop()``` loops accepting new connections, and for each connection calls ```handle_connection()``` to handle this connection. Our ```handle_connection()``` returns a future saying when handling this connection completed, but importantly, we do ***not*** wait for this future: Remember that ```keep_doing``` will only start the next iteration when the future returned by the previous iteration is resolved. Because we want to allow parallel ongoing connections, we don't want the next ```accept()``` to wait until the previously accepted connection was closed. So we call ```handle_connection()``` to start the handling of the connection, but return nothing from the continuation, which resolves that future immediately, so ```keep_doing``` will continue to the next ```accept()```.
 
+> 主函数`service_loop()`循环接受新的连接，并为每个连接调用`handle_connection()`来处理这个连接。当处理这个连接完成时，我们`handle_connection()`返回一个`future`说明这个连接什么时候处理完成，但重要的是，我们不等待这个`future`：记住，`keep_doing`只有当前一个迭代返回的`future`被解决时，才会开始下一个迭代。因为我们希望允许并行正在进行的连接，我们不希望下一个`accept()`等到之前接受的连接关闭。所以我们调用`handle_connection()`来开始处理连接，但没有从`continuation`中返回任何东西，这会立即解决这个`future`，所以`keep_doing`将继续下一个`accept()`
+
 This demonstrates how easy it is to run parallel _fibers_ (chains of continuations) in Seastar - When a continuation runs an asynchronous function but ignores the future it returns, the asynchronous operation continues in parallel, but never waited for.
+
+> 这展示了在 Seastar 中运行并行`fiber`（`continuation`链）是多么容易—— 当`continuation`运行异步函数但忽略它返回的`future`时，异步操作将并行继续，但从不等待。
 
 It is often a mistake to silently ignore an exception, so if the future we're ignoring might resolve with an except, it is recommended to handle this case, e.g. using a ```handle_exception()``` continuation. In our case, a failed connection is fine (e.g., the client might close its connection will we're sending it output), so we did not bother to handle the exception.
 
+> 默默地忽略异常通常是错误的，所以如果我们忽略的`future`可能会用异常解决，建议处理这种情况，例如使用`handle_exception()``continuation`。在我们的例子中，一个失败的连接是没问题的（例如，客户端可能会关闭它的连接，我们会发送它输出），所以我们没有费心去处理这个异常。
+
 The ```handle_connection()``` function itself is straightforward --- it repeatedly calls ```read()``` read on the input stream, to receive a ```temporary_buffer``` with some data, and then moves this temporary buffer into a ```write()``` call on the output stream. The buffer will eventually be freed, automatically, when the ```write()``` is done with it. When ```read()``` eventually returns an empty buffer signifying the end of input, we stop ```repeat```'s iteration by returning a ```stop_iteration::yes```.
+
+> `handle_connection()`函数本身很简单 —— 它在输入流上反复调用 `read()`，以接收带有一些数据的`temporary_buffer`，然后将此临时缓冲区`move`到对输出流的`write()`调用中。缓冲区最终将在`write()`完成后自动释放。当`read()`最终返回一个表示输入结束的空缓冲区时，我们repeat通过返回`stop_iteration::yes`来停止迭代。
 
 # Sharded services
 
 In the previous section we saw that a Seastar application usually needs to run its code on all available CPU cores. We saw that the `seastar::smp::submit_to()` function allows the main function, which initially runs only on the first core, to start the server's code on all `seastar::smp::count` cores.
 
+> 在上一节中，我们看到 Seastar 应用程序通常需要在所有可用的 CPU 上运行其代码。我们看到 `seastar::smp::submit_to()` 函数允许最初只在第一个核上运行的 main 函数在所有 `seastar::smp::count` 核上启动服务器的代码。
+
 However, usually one needs not just to run code on each core, but also to have an object that contains the state of this code. Additionally, one may like to interact with those different objects, and also have a mechanism to stop the service running on the different cores.
+
+> 但是，通常不仅需要在每个内核上运行代码，还需要有一个包含该代码状态的对象。此外，可能想要与那些不同的对象进行交互，并且还具有一种机制来停止在不同内核上运行的服务。
 
 The `seastar::sharded<T>` template provides a structured way create such a _sharded service_. It creates a separate object of type `T` in each core, and provides mechanisms to interact with those copies, to start some code on each, and finally to cleanly stop the service.
 
+> `seastar::sharded<T>` 模板提供了一种结构化的方式来创建这样的 `sharded service`。它在每个核心中创建一个单独的 `T` 类型的对象，并提供与这些副本交互的机制，在每个核心上启动一些代码，最后彻底停止服务。
+
 To use `seastar::sharded`, first create a class for the object holding the state of the service on a single core. For example:
+
+> 要使用 `seastar::sharded`，首先要为在单核上保存服务状态的对象创建一个类。例如：
 
 ```cpp
 #include <seastar/core/future.hh>
@@ -1922,7 +2001,11 @@ public:
 
 The only mandatory method in this object is `stop()`, which will be called in each core when we want to stop the sharded service and want to wait until it stops on all cores.
 
+> 该对象中唯一必须要实现的方法是 `stop()`，当我们想要停止分片服务并希望等到它在所有核心上停止时，它将在每个核心中调用。
+
 Now let's see how to use it:
+
+> 现在让我们看看如何使用它：
 
 ```cpp
 #include <seastar/core/sharded.hh>
@@ -1942,11 +2025,19 @@ seastar::future<> f() {
 
 The `s.start()` starts the service by creating a `my_service` object on each of the cores. The arguments to `s.start()`, if any (in this example, `std::string("hello")`), are passed to `my_service`'s constructor.
 
+> `s.start()` 通过在每个核心上创建一个 `my_service` 对象来启动服务。`s.start()` 的参数（如果有的话（在这个例子中，`std::string("hello")`）），被传递给`my_service` 的构造函数。
+
 But `s.start()` did not start running any code yet (besides the object's constructor). For that, we have the `s.invoke_on_all()` which runs the given lambda on all the cores - giving each lambda the local `my_service` object on that core. In this example, we have a `run()` method on each object, so we run that.
+
+> 但 `s.start()` 还没有开始运行任何代码（除了对象的构造函数）。为此我们有 `s.invoke_on_all()` 函数，它在所有的核心上运行给定的 lambda，lambda 的参数是线程本地对象 `my_service`。在这个例子中，我们对每个对象都有一个 `run()` 方法，所以我们运行它。
 
 Finally, at the end of the run we want to give the service on all cores a chance to shut down cleanly, so we call `s.stop()`. This will call the `stop()` method on each core's object, and wait for all of them to finish. Calling `s.stop()` before destroying `s` is mandatory - Seastar will warn you if you forget to do it.
 
+> 最后，在运行结束时，我们想让所有核心上的服务有机会干净地关闭，所以我们调用 `s.stop()`。这将调用每个核心对象的 `stop` 方法，并等待它们全部完成。`s` 销毁前调用 `s.stop()` 是强制性的，如果你忘记这样做，Seastar 会警告你。
+
 In addition to `invoke_on_all()` which runs the same code on all shards, another feature a sharded service often needs is for one shard to invoke code another specific shard. This is done by calling the sharded service's `invoke_on()` method. For example:
+
+> 除了在所有分片上运行相同的代码的 `invoke_on_all()` 之外，分片服务通常需要的另一个功能是：在一个分片上调用另一个特定分片的代码。这是通过调用分片服务的 `invoke_on()` 方法来完成的。例如：
 
 ```cpp
 seastar::sharded<my_service> s;
@@ -1958,6 +2049,8 @@ return s.invoke_on(0, [] (my_service& local_service) {
 ```
 
 This runs the lambda function on shard 0, with a reference to the local `my_service` object on that shard. 
+
+> 这将在分片 0 上运行 lambda 函数，并引用该分片上的本地 `my_service` 对象。
 
 
 # Shutting down cleanly
@@ -2230,6 +2323,8 @@ handle SIGALRM pass noprint
 
 As we already defined above, An **asynchronous function**, also called a **promise**, is a function which returns a future and arranges for this future to be eventually resolved. As we already saw, an asynchronous function is usually written in terms of other asynchronous functions, for example we saw the function `slow()` which waits for the existing asynchronous function `sleep()` to complete, and then returns 3:
 
+> 正如我们在上面已经定义的那样，异步函数(**asynchronous function**)，也称为 **promise**，是一个返回 future 并安排这个 future 最终被解决的函数。正如我们已经看到的，一个异步函数通常是根据其他异步函数来编写的，例如我们看到的异步函数 `slow()` 等待现有异步函数 `sleep()` 完成，然后返回 3：
+
 ```cpp
 seastar::future<int> slow() {
     using namespace std::chrono_literals;
@@ -2239,32 +2334,43 @@ seastar::future<int> slow() {
 
 The most basic building block for writing promises is the **promise object**, an object of type `promise<T>`. A `promise<T>` has a method `future<T> get_future()` to returns a future, and a method `set_value(T)`, to resolve this future. An asynchronous function can create a promise object, return its future, and the `set_value` method to be eventually called - which will finally resolve the future it returned.
 
+> 编写 promise 的最基本构建块是 promise 对象，它是一个 `promise<T>` 类型的对象。`promise<T>` 有一个返回 future 的方法 `future<T> get_future()` 和一个来解决这个 `future` 的方法 `set_value(T)`。一个异步函数可以创建一个 `promise` 对象，返回它的 `future`，以及最终通过调用 `set_value` 方法解决它返回的 `future`。
+
 CONTINUE HERE. write an example, e.g., something which writes a message every second, and after 10 messages, completes the future.
 
 # Memory allocation in Seastar
 ## Per-thread memory allocation
 Seastar requires that applications be sharded, i.e., that code running on different threads operate on different objects in memory. We already saw in [Seastar memory] how Seastar takes over a given amount of memory (often, most of the machine's memory) and divides it equally between the different threads. Modern multi-socket machines have non-uniform memory access (NUMA), meaning that some parts of memory are closer to some of the cores, and Seastar takes this knowledge into account when dividing the memory between threads. Currently, the division of memory between threads is static, and equal - the threads are expected to experience roughly equal amount of load and require roughly equal amounts of memory.
 
-> Seastar 要求应用程序被分片，也就是说，运行在不同线程上的代码操作内存中的不同对象。我们已经在 [Seastar memory] 中看到了 Seastar 如何接管给定数量的内存(通常是机器的大部分内存)，并将其平均分配到不同的线程中。现代多套接字计算机具有非统一内存访问(NUMA)，这意味着内存的某些部分更接近某些核心，在线程之间划分内存时，Seastar 考虑到了这一点。
+> Seastar 要求对应用程序进行分片，即运行在不同线程上的代码操作内存中的不同对象。我们已经在 [Seastar memory] 中看到了 Seastar 如何接管给定数量的内存(通常是机器的大部分内存)，并将其平均分配给不同的线程。现代多插槽计算机具有非统一内存访问(NUMA)，这意味着内存的某些部分更接近某些内核，Seastar 在线程之间划分内存时，考虑到了这一点。
 >
 > 目前，线程之间的内存分配是静态的，并且是相等的，线程所承受的负载大致相等，需要的内存大致相等。
 
 To achieve this per-thread allocation, Seastar redefines the C library functions `malloc()`, `free()`, and their numerous relatives --- `calloc()`, `realloc()`, `posix_memalign()`, `memalign()`, `malloc_usable_size()`, and `malloc_trim()`. It also redefines the C++ memory allocation functions, `operator new`, `operator delete`,  and all their variants (including array versions, the C++14 delete taking a size, and the C++17 variants taking required alignment).
 
-> 为了实现这种 per-thread 分配，Seastar 重新定义了 C 库函数 `malloc()`、`free()` 以及它们的众多相关函数: `calloc()`、`realloc()`、`posix_memalign()`、`memalign()`、`malloc_usable_size()` 和 `malloc_trim()`。它还重新定义了 c++ 的内存分配函数，`operator new`， `operator delete` 以及它们的所有变体(包括数组版本，c++14 的 delete 接受一个 size，c++17 的变体接受所需的对齐)。
+> 为了实现这种按线程分配，Seastar 重新定义了 C 库函数 `malloc()`、`free()` 以及它们的众多相关函数: `calloc()`、`realloc()`、`posix_memalign()`、`memalign()`、`malloc_usable_size()` 和 `malloc_trim()`。它还重新定义了 c++ 的内存分配函数，`operator new`， `operator delete` 以及它们的所有变体(包括数组版本，c++14 的 delete 接受一个 size，c++17 的变体接受所需的对齐)。
 
 It is important to remember that Seastar's different threads *can* see memory allocated by other threads, but they are nontheless strongly discouraged from actually doing this. Sharing data objects between threads on modern multi-core machines results in stiff performance penalties from locks, memory barriers, and cache-line bouncing. Rather, Seastar encourages applications to avoid sharing objects between threads when possible (by *sharding* --- each thread owns a subset of the objects), and when threads do need to interact they do so with explicit message passing, with `submit_to()`, as we shall see later.
 
-> 重要的是要记住，Seastar 的不同线程可以看到其他线程分配的内存，但它们实际上不鼓励这样做。在现代多核机器的线程之间共享数据对象会导致锁、内存屏障和 cache-line bouncing 等严重的性能损失。相反，Seastar 鼓励应用程序尽可能避免在线程之间共享对象(通过分片 --- 每个线程拥有对象的一个子集)，当线程确实需要交互时，它们通过显式消息传递来实现，使用 `submit_to()` , 我们将在后面看到。
+> 重要的是要记住 Seastar 的不同线程可以看到其他线程分配的内存，但实际上不鼓励这样做。在现代多核机器的线程之间共享数据对象会导致锁、内存屏障和 cache-line bouncing 等严重的性能损失。相反，Seastar 鼓励应用程序尽可能避免在线程之间共享对象(通过分片 --- 每个线程拥有对象的一个子集)，当线程确实需要交互时，可以使用 `submit_to()` 方法，通过显式消息传递来实现，我们将在后面看到。
 
 ## Foreign pointers
 An object allocated on one thread will be owned by this thread, and eventually should be freed by the same thread. Freeing memory on the *wrong* thread is strongly discouraged, but is currently supported (albeit slowly) to support library code beyond Seastar's control. For example, `std::exception_ptr` allocates memory; So if we invoke an asynchronous operation on a remote thread and this operation returns an exception, when we free the returned `std::exception_ptr` this will happen on the "wrong" core. So Seastar allows it, but inefficiently.
 
+> 在一个线程上分配的对象将归该线程所有，最终应由同一线程释放。强烈建议不要在错误的线程上释放内存，但目前为了支持 Seastar 无法控制的库代码，这是支持的（尽管速度很慢）。比如 `std::exception_ptr` 分配内存。因此，如果我们在远程线程上调用异步操作并且该操作返回异常，则当我们释放返回的 `std::exception_ptr` 时，这将发生在 “错误” 的核心上。所以 Seastar 允许这样做，但效率低下。
+
 In most cases objects should spend their entire life on a single thread and be used only by this thread. But in some cases we want to reassign ownership of an object which started its life on one thread, to a different thread. This can be done using a `seastar::foreign_ptr<>`. A pointer, or smart pointer, to an object is wrapped in a `seastar::foreign_ptr<P>`. This wrapper can then be moved into code running in a different thread (e.g., using `submit_to()`).
+
+> 在大多数情况下，对象应该在一个线程上度过它们的整个生命周期，并且只被这个线程使用。但是在某些情况下，我们希望将一个对象的所有权从分配该对象的线程转移给另一个线程，这可以使用 `seastar::foreign_ptr<>` 来完成。指向对象的指针或智能指针被包装在 `seastar::foreign_ptr<P>` 中，然后可以将该包装器移动到在不同线程运行的代码中（例如，使用 `submit_to()`）。
 
 The most common use-case is a `seastar::foreign_ptr<std::unique_ptr<T>>`. The thread receiving this `foreign_ptr` will get exclusive use of the object, and when it destroys this wrapper, it will go back to the original thread to destroy the object. Note that the object is not only freed on the original shard - it is also *destroyed* (i.e., its destructor is run) there. This is often important when the object's destructor needs to access other state which belongs to the original shard - e.g., unlink itself from a container.
 
+> 最常见的用例是 `seastar::foreign_ptr<std::unique_ptr<T>>`。接收 `foreign_ptr` 的线程将独占这个对象，当它销毁这个包装器时，它会返回到原来的线程销毁该对象。请注意，该对象不仅在原始分片上被释放，它还在那里被销毁（即，它的析构函数运行）。当对象的析构函数需要访问属于原始分片的其他状态时，这通常很重要 - 例如，将自身与容器取消链接。
+
 Although `foreign_ptr` ensures that the object's *destructor* automatically runs on the object's home thread, it does not absolve the user from worrying where to run the object's other methods. Some simple methods, e.g., methods which just read from the object's fields, can be run on the receiving thread. However, other methods may need to access other data owned by the object's home shard, or need to prevent concurrent operations. Even if we're sure that object is now used exclusively by the receiving thread, such methods must still be run, explicitly, on the home thread:
+
+> 虽然 `foreign_ptr` 确保对象的析构函数自动在对象的主线程上运行，但它并不能免除用户担心在何处运行对象的其他方法的麻烦。一些简单的方法，例如，从对象的字段中读取的方法，可以在接收线程上运行。但是，其他方法可能需要访问对象的主分片所拥有的其他数据，或者需要防止并发操作。即使我们确定该对象现在仅由接收线程使用，这些方法仍必须在主线程上显式运行：
+
 ```
     // fp is some foreign_ptr<>
     return smp::submit_to(fp.get_owner_shard(), [p=fp.get()]
@@ -2272,13 +2378,20 @@ Although `foreign_ptr` ensures that the object's *destructor* automatically runs
 ```
 So `seastar::foreign_ptr<>` not only has functional benefits (namely, to run the destructor on the home shard), it also has *documentational* benefits - it warns the programmer to watch out every time the object is used, that this is a *foreign* pointer, and if we want to do anything non-trivial with the pointed object, we may need to do it on the home shard.
 
+> 所以 `seastar::foreign_ptr<>` 不仅有功能上的好处（即在主分片上运行析构函数），它还有文档上的好处：它警告程序员每次使用对象时都要小心，这是一个外部指针，如果我们想要要对指向的对象做任何重要的事情，我们可能需要在主分片上做。
+
 Above, we discussed the case of transferring ownership of an object to a another shard, via `seastar::foreign_ptr<std::unique_ptr<T>>`. However, sometimes the sender does not want to relinquish ownership of the object. Sometimes, it wants the remote thread to operate on its object and return with the object intact. Sometimes, it wants to send the same object to multiple shards. In such cases, `seastar::foreign_ptr<seastar::lw_shared_ptr<T>> is useful. The user needs to watch out, of course, not to operate on the same object from multiple threads concurrently. If this cannot be ensured by program logic alone, some methods of serialization must be used - such as running the operations on the home shard with `submit_to()` as described above.
 
+> 上面，我们讨论了通过 `seastar::foreign_ptr<std::unique_ptr<T>>` 将对象的所有权转移到另一个分片的情况。但是，有时发送者不想放弃对象的所有权。有时，它希望远程线程对其对象进行操作，并返回完整的对象。有时，它想将同一个对象发送到多个分片。在这种情况下，可以使用`seastar::foreign_ptr<seastar::lw_shared_ptr<T>>`。使用者当然也要小心，不要从多个线程并行操作同一个对象。如果这不能通过程序逻辑来保证，必须使用一些串行化的方法： 比如在主分片使用上述的 `submit_to()` 来运行这些操作。
+
 Normally, a `seastar::foreign_ptr` cannot not be copied - only moved. However, when it holds a smart pointer that can be copied (namely, a `shared_ptr`), one may want to make an additional copy of that pointer and create a second `foreign_ptr`. Doing this is inefficient and asynchronous (it requires communicating with the original owner of the object to create the copies), so a method `future<foreign_ptr> copy()` needs to be explicitly used instead of the normal copy constructor.
+
+> 通常 `seastar::foreign_ptr` 不能被复制，只能 `move`。但是，当它拥有一个可以复制的智能指针（即`shared_ptr`）时，可能需要制作该指针的额外副本并创建第二个 `foreign_ptr`。这样做是低效且异步的（它需要与对象的原始所有者通信以创建副本），因此需要显式使用方法 `future<foreign_ptr> copy()` 而不是普通的复制构造函数。
+
 # Seastar::thread
 Seastar's programming model, using futures and continuations, is very powerful and efficient.  However, as we've already seen in examples above, it is also relatively verbose: Every time that we need to wait before proceeding with a computation, we need to write another continuation. We also need to worry about passing the data between the different continuations (using techniques like those described in the [Lifetime management] section). Simple flow-control constructs such as loops also become more involved using continuations. For example, consider this simple classical synchronous code:
 
-> Seastar 的编程模型使用了 future 和 continuation，非常强大和高效。然而，正如我们已经在上面的例子中看到的，它也相对冗长: 每次我们需要在继续进行计算之前等待时，需要编写另一个 continuation。我们还需要考虑在不同的 continuation 之间传递数据(使用 [Lifetime management] 一节中描述的技术)。简单的流控制结构(如循环)也需要使用 continuation。例如，考虑以下简单的经典同步代码:
+> Seastar 使用了 future 和 continuation 的编程模型是非常强大和高效的。然而，正如我们在上面的例子中已经看到的那样，它也相对冗长：每次在进行计算之前我们需要等待，需要编写另一个 continuation。我们还需要考虑在不同的 continuation 之间传递数据(使用 [Lifetime management] 一节中描述的技术)。简单的流控制结构(如循环)也需要使用 continuation。例如，考虑以下简单的经典同步代码:
 
 ```cpp
     std::cout << "Hi.\n";
@@ -2303,7 +2416,7 @@ In Seastar, using futures and continuations, we need to write something like thi
 
 But Seastar also allows, via `seastar::thread`, to write code which looks more like synchronous code. A `seastar::thread` provides an execution environment where blocking is tolerated; You can issue an asyncrhonous function, and wait for it in the same function, rather then establishing a callback to be called with `future<>::then()`:
 
-> 但是 Seastar 也允许通过 `Seastar::thread` 编写看起来更像同步的代码。`seastar::thread` 提供了一个允许阻塞的执行环境，你可以发出一个异步函数，并在同一个函数中等待它，而不是建立一个回调，用 `future<>::then()` 调用:
+> 但是 Seastar 也允许通过 `Seastar::thread` 编写看起来更像同步的代码。`seastar::thread` 提供了一个允许阻塞的执行环境，你可以发出一个异步函数，并在同一个函数中等待它，而不是建立一个要调用 `future<>::then()` 的回调:
 
 ```cpp
     seastar::thread th([] {
@@ -2316,23 +2429,23 @@ But Seastar also allows, via `seastar::thread`, to write code which looks more l
 ```
 A `seastar::thread` is **not** a separate operating system thread. It still uses continuations, which are scheduled on Seastar's single thread (per core). It works as follows:
 
-> `seastar::thread` 不是操作系统线程。它仍然使用 continuation，这是在 Seastar 的单线程(每个核心)上调度的。其工作原理如下:
+> `seastar::thread` 不是操作系统线程。它仍然使用在 Seastar 的单线程上运行的 continuation。其工作原理如下:
 
 The `seastar::thread` allocates a 128KB stack, and runs the given function until the it *blocks* on the call to a future's `get()` method. Outside a `seastar::thread` context, `get()` may only be called on a future which is already available. But inside a thread, calling `get()` on a future which is not yet available stops running the thread function, and schedules a continuation for this future, which continues to run the thread's function (on the same saved stack) when the future becomes available.
 
-> `seastar::thread` 分配一个 128KB 的堆栈，并运行给定的函数，当调用 future 的 `get()` 方法时将会阻塞。在 `seastar::thread` 上下文之外，`get()` 只能在已经可用的 future 对象上调用。但在线程内部，对不可用的 future 调用 `get()` 将停止运行线程函数，并为这个 future 绑定一个 continuation，当 future 变为可用时，它将继续运行线程的函数(在同一个已保存的堆栈上)。
+> `seastar::thread` 分配一个 128KB 的堆栈，并运行给定的函数，直到它在 future 的 `get()` 方法的调用上阻塞。在 `seastar::thread` 上下文之外，`get()` 只能在已经就绪的 future 对象上调用。但在线程内部，调用一个还未就绪的 future 的 `get()` 方法将停止运行线程函数，并为这个 future 绑定一个 continuation，当 future 变为就绪时，它将继续运行线程的函数(在同一个已保存的堆栈上)。
 
 Just like normal Seastar continuations, `seastar::thread`s always run on the same core they were launched on. They are also cooperative: they are never preempted except when `seastar::future::get()` blocks or on explict calls to `seastar::thread::yield()`.
 
-> 就像普通的 Seastar continuation 一样, `seastar::thread` 总是运行在它们启动时所在的同一个核心上。它们也是协作性的: 它们永远不会被抢占，除非在 `seastar::future::get()` 阻塞时或在显式调用 `seastar::thread::yield()` 时。
+> 就像普通的 Seastar continuation 一样, `seastar::thread` 总是在启动它们的同一核心上运行。它们也是协作性的: 它们永远不会被抢占，除非在 `seastar::future::get()` 阻塞或显式调用 `seastar::thread::yield()`.
 
 It is worth reiterating that a `seastar::thread` is not a POSIX thread, and it can only block on Seastar futures, not on blocking system calls. The above example used `seastar::sleep()`, not the `sleep()` system call. The `seastar::thread`'s function can throw and catch exceptions normally. Remember that `get()` will throw an exception if the future resolves with an exception.
 
-> 值得重申的是, `seastar::thread` 不是 POSIX 线程，它只能阻塞 Seastar futures, 而不能阻塞系统调用。上面的例子使用了 `seastar::sleep()`, 而不是 `sleep()` 系统调用。线程的函数可以正常地抛出和捕获异常。记住，如果 future 处理异常, `get()` 将抛出异常。
+> 值得重申的是, `seastar::thread` 不是 POSIX 线程，它只能阻塞 Seastar futures, 而不能阻塞系统调用。上面的例子使用了 `seastar::sleep()`, 而不是 `sleep()` 系统调用。线程的函数可以正常地抛出和捕获异常。记住，如果 future 包含异常, `get()` 将抛出异常。
 
 In addition to `seastar::future::get()`, we also have `seastar::future::wait()` to wait *without* fetching the future's result. This can sometimes be useful when you want to avoid throwing an exception when the future failed (as `get()` does). For example:
 
-> 除了 `seastar::future::get()` 之外，我们还有 `seastar::future::wait()` 来等待而不获取 future 的结果。当您希望避免在 future 失败时抛出异常(如 `get()`)时，这有时会很有用。
+> 除了 `seastar::future::get()` 之外，我们还有 `seastar::future::wait()` 来等待而不获取 future 的结果。当你希望避免在 future 失败时抛出异常(如 `get()`)时，这有时会很有用。
 
 ```cpp
     future<char> getchar();
@@ -2373,7 +2486,7 @@ seastar::future<> f() {
 
 The `seastar::async()` function provides a convenient shortcut for creating a `seastar::thread` and returning a future which resolves when the thread completes:
 
-> `seastar::async()` 函数为创建 `seastar::thread` 并在线程完成时返回一个已经就绪的 future 提供了一个方便的快捷方式:
+> `seastar::async()` 函数提供了一个方便快捷的方式来创建 `seastar::thread`，该函数在线程完成时返回一个已经就绪的 future:
 
 ```cpp
 #include <seastar/core/sleep.hh>
@@ -2390,6 +2503,8 @@ seastar::future<> f() {
 ```
 
 `seastar::async()`'s lambda may return a value, and `seastar::async()` returns it when it completes. For example:
+
+> `seastar::async()` 的 lambda 可能会返回一个值，并在 `seastar::async()` 完成时返回它。例如：
 
 ```cpp
 seastar::future<seastar::sstring> read_file(sstring file_name) {
@@ -2408,21 +2523,21 @@ While `seastar::thread`s and `seastar::async()` make programming more convenient
 # Isolation of application components
 Seastar makes multi-tasking very easy - as easy as running an asynchronous function. It is therefore easy for a server to do many unrelated things in parallel. For example, a server might be in the process of answering 100 users' requests, and at the same time also be making progress on some long background operation.
 
-> Seastar 使多任务处理变得非常简单 —— 就像运行异步功能一样简单。因此，服务器很容易并行地做许多不相关的事情。例如，服务器可能正在响应 100 个用户的请求，同时也在进行一些长时间的后台操作。
+> Seastar 使多任务处理就像运行异步函数一样简单。因此，服务器很容易并行地做许多不相关的事情。例如，服务器可能正在响应 100 个用户的请求，同时也在进行一些长时间的后台操作。
 
 But in the above example, what percentage of the CPU and disk throughput will the background operation get? How long can one of the user's requests be delayed by the background operation? Without the mechanisms we describe in this section, these questions cannot be reliably answered:
 
 * The background operation may be a very "considerate" single fiber, i.e., run a very short continuation and then schedule the next continuation to run later. At each point the scheduler sees 100 request-handling continuations and just one of the background continuations ready to run. The background task gets around 1% of the CPU time, and users' requests are hardly delayed.
 * On the other hand, the background operation may spawn 1,000 fibers in parallel and have 1,000 ready-to-run continuations at each time. The background operation will get about 90% of the runtime, and the continuation handling a user's request may get stuck behind 1,000 of these background continuations, and experience huge latency.
 
-> 但是在上面的例子中，后台操作将获得多少百分比的 CPU 和磁盘吞吐量？一个用户的请求可以被后台操作延迟多长时间？没有我们在本节中描述的机制，这些问题无法得到可靠的回答:
+> 但是在上面的例子中，后台操作将获得多少百分比的 CPU 和磁盘吞吐量？用户的一个请求可以被后台操作延迟多长时间？没有我们在本节中描述的机制，这些问题无法得到可靠的回答:
 >
-> * 后台操作可能是一个非常 “体贴” 的单一光纤，也就是说，运行一个非常短的 continuation, 然后调度运行下一个 continuation. 在每个点上，调度器看到 100 个处理请求的 continuation, 只有一个后台 continuation 准备运行。后台任务只占用 1% 左右的 CPU 时间，用户的请求几乎不会被延迟。
-> * 另一方面，后台操作可能并行生成 1,000 个光纤，并且每次都有 1,000 个准备运行的 continuation. 后台操作将获得大约 90% 的运行时间，而处理用户请求的 continuation 可能会被困在 1000 个这样的后台 continuation 之后，并经历巨大的延迟。
+> * 后台操作可能是一个非常 “周到” 的单一 fiber，即运行一个非常短的 continuation, 然后安排下一个 continuation 稍后运行。在每个点上，调度器看到 100 个处理请求的 continuation, 并且只有一个准备好运行的后台 continuation。后台任务只占用 1% 左右的 CPU 时间，用户的请求几乎没有延迟。
+> * 另一方面，后台操作可能并行生成 1,000 个 fiber，并且每次都有 1,000 个准备运行的 continuation. 后台操作将获得大约 90% 的运行时间，而处理用户请求的 continuation 可能会被安装在 1000 个这样的后台 continuation 之后，并经历巨大的延迟。
 
 Complex Seastar applications often have different components which run in parallel and have different performance objectives. In the above example we saw two components - user requests and the background operation.  The first goal of the mechanisms we describe in this section is to _isolate_ the performance of each component from the others; In other words, the throughput and latency of one component should not depend on decisions that another component makes - e.g., how many continuations it runs in parallel. The second goal is to allow the application to _control_ this isolation, e.g., in the above example allow the application to explicitly control the amount of CPU the background operation recieves, so that it completes at a desired pace.
 
-> 复杂的 Seastar 应用程序通常具有并行运行的不同组件，具有不同的性能目标。在上面的例子中，我们看到了两个组件 —— 用户请求和后台操作。我们在本节中描述的机制的第一个目标是将每个组件的性能与其他组件隔离开来，换句话说，一个组件的吞吐量和延迟不应该依赖于另一个组件的决策。例如，它并行运行了多少个 continuation。第二个目标是允许应用程序控制这种隔离，例如，在上面的例子中，允许应用程序显式地控制后台操作接收的 CPU 数量，以便它以预期的速度完成。
+> 复杂的 Seastar 应用程序通常具有许多不同的并行运行的组件，这些组件具有不同的性能目标。在上面的例子中，我们看到了两个组件：用户请求和后台操作。我们在本节中描述的机制的第一个目标是将每个组件的性能与其他组件隔离开来，换句话说，一个组件的吞吐量和延迟不应该取决于另一个组件做出的决定，例如，它并行运行了多少个 continuation。第二个目标是允许应用程序控制这种隔离，例如，在上面的例子中，允许应用程序显式地控制后台操作接收的 CPU 数量，以便它以预期的速度完成。
 
 In the above examples we used CPU time as the limited resource that the different components need to share effectively. As we show later, another important shared resource is disk I/O.
 
@@ -2431,7 +2546,7 @@ In the above examples we used CPU time as the limited resource that the differen
 ## Scheduling groups (CPU scheduler)
 Consider the following asynchronous function `loop()`, which loops until some shared variable `stop` becomes true. It keeps a `counter` of the number of iterations until stopping, and returns this counter when finally stopping.
 
-> 考虑下面的异步函数 `loop()`, 它循环直到某个共享变量 `stop` 变为 true。它保留迭代次数的 `counter` 直到停止，并在最终停止时返回该计数器。
+> 考虑下面的异步函数 `loop()`, 它循环直到某个共享变量 `stop` 变为 true。它保留迭代次数 `counter` 直到停止，并在最终停止时返回该计数器。
 
 ```cpp
 seastar::future<long> loop(int parallelism, bool& stop) {
@@ -2448,7 +2563,7 @@ seastar::future<long> loop(int parallelism, bool& stop) {
 ```
 The `parallelism` parameter determines the parallelism of the silly counting operation: `parallelism=1` means we have just one loop incrementing the counter; `parallelism=10` means we start 10 loops in parallel all incrementing the same counter.
 
-> `parallelism` 参数决定了计数操作的并行度: `parallelism=1` 意味着我们只有一个循环增加计数器; `parallelism=10` 意味着我们开始 10 个并行循环，所有循环都增加相同的计数器。
+> `parallelism` 参数决定了计数操作的并行度: `parallelism=1` 意味着我们只有一个循环递增计数器; `parallelism=10` 意味着我们并行启动 10 个循环，所有循环都递增相同的计数器。
 
 What happens if we start two `loop()` calls in parallel and let them run for 10 seconds?
 
@@ -2469,7 +2584,7 @@ seastar::future<> f() {
 ```
 It turns out that if the two `loop()` calls had the same parallelism `1`, we get roughly the same amount of work from both of them:
 
-> 事实证明，如果两个 `loop()` 调用具有相同的并行度 `1`, 我们从它们那里得到的工作量大致相同:
+> 事实证明，如果两个 `loop()` 调用具有相同的并行度 `1`, 它们的工作量大致相同:
 
 ```
 Counters: 3'559'635'758, 3'254'521'376
@@ -2488,7 +2603,7 @@ Why does the amount of work that loop(1) can do in ten seconds depends on the pa
 
 The reason this happens is as follows: When a future resolves and a continuation was linked to it, this continuation becomes ready to run. By default, Seastar's scheduler keeps a single list of ready-to-run continuations (in each shard, of course), and runs the continuations at the same order they became ready to run. In the above example, `loop(1)` always has one ready-to-run continuation, but `loop(10)`, which runs 10 loops in parallel, always has ten ready-to-run continuations. So for every continuation of `loop(1)`, Seastar's default scheduler will run 10 continuations of `loop(10)`, which is why loop(10) gets 10 times more work done.
 
-> 发生这种情况的原因如下: 当一个 future 被解决并且一个 continuation 被链接到它时，这个 continuation 就准备好运行了。默认情况下, Seastar 的调度器维护着一个准备运行的 continuation 列表(当然是在每个碎片中)，并以准备运行的 continuation 的相同顺序运行这些 continuation. 在上面的例子中，`loop(1)` 总是有一个准备运行的 continuation，但是并行运行 10 个循环的 `loop(10)` 总是有 10 个准备运行的 continuation。因此，对于 `loop(1)` 的每一个 continuation，Seastar 的默认调度器将运行 `loop(10)` 的 10 个延续，这就是为什么 `loop(10)` 可以多完成 10 倍的工作。
+> 发生这种情况的原因如下: 当一个 future 就绪并且一个 continuation 链接到它时，这个 continuation 就可以运行了。默认情况下, Seastar 的调度器维护着一个准备运行的 continuation 列表(当然是在每个分片中)，并按照他们准备好的顺序运行这些 continuation。在上面的例子中，`loop(1)` 总是有一个准备运行的 continuation，但是并行运行 10 个循环的 `loop(10)` 总是有 10 个准备运行的 continuation。因此，对于 `loop(1)` 的每一个 continuation，Seastar 的默认调度器将运行 `loop(10)` 的 10 个 continuation，这就是为什么 `loop(10)` 可以多完成 10 倍的工作。
 
 To solve this, Seastar allows an application to define separate components known as **scheduling groups**, which each has a separate list of ready-to-run continuations. Each scheduling group gets to run its own continuations on a desired percentage of the CPU time, but the number of runnable continuations in one scheduling group does not affect the amount of CPU that another scheduling group gets. Let's look at how this is done:
 
@@ -2535,11 +2650,11 @@ seastar::future<> f() {
 ```
 Here we created two scheduling groups, `sg1` and `sg2`. Each scheduling group has an arbitrary name (which is used for diagnostic purposes only), and a number of *shares*, a number traditionally between 1 and 1000: If one scheduling group has twice the number of shares than a second scheduling group, it will get twice the amount of CPU time. In this example, we used the same number of shares (100) for both groups, so they should get equal CPU time.
 
-> 这里我们创建了两个调度组，`sg1` 和 `sg2`。每个调度组都有一个任意的名称(仅用于诊断目的)和一些共享资源，这个数量通常在 1 到 1000 之间: 如果一个调度组的共享数量是第二个调度组的两倍，那么它将获得两倍的 CPU 时间。在本例中，我们为两组使用了相同数量的共享(100)，因此它们应该获得相同的 CPU 时间。
+> 这里我们创建了两个调度组: `sg1` 和 `sg2`。每个调度组都有一个任意的名称(仅用于诊断目的)和一些共享资源，这个数量通常在 1 到 1000 之间: 如果一个调度组的共享数量是第二个调度组的两倍，那么它将获得两倍的 CPU 时间。在本例中，我们为两组使用了相同数量的共享(100)，因此它们应该获得相同的 CPU 时间。
 
 Unlike most objects in Seastar which are separate per shard, Seastar wants the identities and numbering of the scheduling groups to be the same on all shards, because it is important when invoking tasks on remote shards. For this reason, the function to create a scheduling group, `seastar::create_scheduling_group()`, is an asynchronous function returning a `future<scheduling_group>`.
 
-> 不像 Seastar 中的大多数对象在每个碎片上是独立的，Seastar 希望调度组的标识和编号在所有碎片上是相同的，因为这在远程碎片上调用任务时很重要。因此，创建调度组的函数 `seastar::create_scheduling_group()` 是一个返回 `future<scheduling_group>` 的异步函数。
+> 不像 Seastar 中的大多数对象在每个分片上是独立的，Seastar 希望调度组的标识和编号在所有分片上是相同的，因为这在远程分片上调用任务时很重要。因此，创建调度组的函数 `seastar::create_scheduling_group()` 是一个返回 `future<scheduling_group>` 的异步函数。
 
 Running the above example, with both scheduling group set up with the same number of shares (100), indeed results in both scheduling groups getting the same amount of CPU time:
 
@@ -2551,11 +2666,11 @@ Counters: 3'353'900'256, 3'350'871'461
 
 Note how now both loops got the same amount of work done - despite one loop having 10 times the parallelism of the second loop.
 
-> 注意，现在两个循环完成的工作量是一样的——尽管其中一个循环的并行度是第二个循环的10倍。
+> 注意，现在两个循环完成的工作量是一样的，尽管其中一个循环的并行度是第二个循环的 10 倍。
 
 If we change the definition of the second scheduling group to have 200 shares, twice the number of shares of the first scheduling group, we'll see the second scheduling group getting twice the amount of CPU time:
 
-> 如果我们将第二个调度组的定义更改为 200 个共享，即第一个调度组的共享数量的两倍，我们将看到第二个调度组获得两倍的 CPU 时间量:
+> 如果我们将第二个调度组的定义更改为 200 个共享，是第一个调度组的共享数量的两倍，我们将看到第二个调度组获得两倍的 CPU 时间量:
 
 ```
 Counters: 2'273'783'385, 4'549'995'716
