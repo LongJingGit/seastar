@@ -157,7 +157,7 @@ set (Seastar_ALLOC_PAGE_SIZE
 
 option (Seastar_APPS
   "Enable application targets."
-  ON)
+  OFF)
 
 set (Seastar_CXX_DIALECT
   "gnu++17"
@@ -278,7 +278,7 @@ set (Seastar_STACK_GUARDS
   "Enable stack guards. Can be ON, OFF or DEFAULT (which enables it for non release builds)")
 
 set (Seastar_SANITIZE
-  "DEFAULT"
+  "OFF"
   CACHE
   STRING
   "Enable ASAN and UBSAN. Can be ON, OFF or DEFAULT (which enables it for Debug and Sanitize)")
@@ -906,7 +906,7 @@ if ((CMAKE_BUILD_TYPE STREQUAL "Debug") OR (CMAKE_BUILD_TYPE STREQUAL "Sanitize"
   target_compile_definitions (seastar
     PUBLIC
       SEASTAR_DEBUG
-      SEASTAR_DEFAULT_ALLOCATOR
+      # SEASTAR_DEFAULT_ALLOCATOR
       SEASTAR_DEBUG_SHARED_PTR
       SEASTAR_SHUFFLE_TASK_QUEUE)
 endif ()
@@ -1036,13 +1036,13 @@ endif ()
 #
 
 if (Seastar_APPS)
-  if (Seastar_EXCLUDE_APPS_FROM_ALL)
-    set (exclude EXCLUDE_FROM_ALL)
-  else ()
-    set (exclude "")
-  endif ()
+  # if (Seastar_EXCLUDE_APPS_FROM_ALL)
+  #   set (exclude EXCLUDE_FROM_ALL)
+  # else ()
+  #   set (exclude "")
+  # endif ()
 
-  add_subdirectory (apps ${exclude})
+  # add_subdirectory (apps ${exclude})
 endif ()
 
 #
