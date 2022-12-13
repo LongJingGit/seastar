@@ -1,8 +1,8 @@
 ## 源码分析
 
-```sh
+创建 listen socket, 并执行 bind, listen 等操作
 
-// 创建 listen socket, 并执行 bind, listen 等操作
+```cpp
 
 _tcp_listeners.push_back(seastar::listen(make_ipv4_address(addr), lo));
 
@@ -37,8 +37,11 @@ server_socket::server_socket(std::unique_ptr<net::server_socket_impl> ssi)      
 
 ########################################################################################################################
 
+```
 
-// 将 listen socket 的 POLLINT 事件封装成异步任务, 添加到 iocbs 中
+将 listen socket 的 POLLINT 事件封装成异步任务, 添加到 iocbs 中
+
+```
 
 do_accepts(_tcp_listeners);                     
 
@@ -90,10 +93,11 @@ void aio_general_context::queue(linux_abi::iocb* iocb)                          
 
 // 返回的是未就绪的 future 
 
-########################################################################################################################
+```
 
+kernel_submit_work_pollfn::poll               将异步任务递交给内核
 
-// kernel_submit_work_pollfn::poll               将异步任务递交给内核
+```cpp
 
 poller kernel_submit_work_poller(std::make_unique<kernel_submit_work_pollfn>(*this));       // reactor.cc:2755
 
@@ -122,13 +126,13 @@ aio_storage_context::submit_work()                              // reactor_backe
 
 int io_submit(aio_context_t io_context, long nr, iocb** iocbs)          // linux-aio.cc: 69
 
+```
 
-########################################################################################################################
+reap_kernel_completions_pollfn::poll         检查内核是否完成了异步 io
 
+如果内核完成了异步任务, 则执行 promise.set_value, 然后 future 变成就绪态, future.then 调用中的任务可以执行
 
-// reap_kernel_completions_pollfn::poll         检查内核是否完成了异步 io
-
-// 如果内核完成了异步任务, 则执行 promise.set_value, 然后 future 变成就绪态, future.then 调用中的任务可以执行
+```cpp
 
 poller final_real_kernel_completions_poller(std::make_unique<reap_kernel_completions_pollfn>(*this));       // reactor.cc:2756
 
@@ -160,12 +164,11 @@ bool reactor_backend_aio::await_events(int timeout, const sigset_t* active_sigma
 
 desc->complete_with(event.res);             // reactor_backend.cc:396
 
+```
 
-########################################################################################################################
-########################################################################################################################
+从连接 socket 读取数据
 
-
-// 从连接 socket 读取数据
+```cpp
 
 future<> process()                          // tcp_sctp_server_demo.cc:119
 
@@ -230,73 +233,36 @@ reap_kernel_completions_pollfn::poll    检查内核是否已经完成了异步 
 
 boost::optional<size_t> read(void* buffer, size_t len)              // posix.hh:216         从连接 socket 读取数据
 
-
-########################################################################################################################
-########################################################################################################################
-
-
-
-
-
-
-
-
-
-
-
-
-// 构造异步 io
-
-future<size_t> posix_file_impl::write_dma()                 // file.cc:327
-
---->
-
-future<size_t> reactor::submit_io_write()                   // reactor.cc:1547
-
---->
-
-future<size_t> io_queue::queue_request()                    // io_queue.cc:248
-
---->
-
-void fair_queue::queue()                                    // fair_queue.cc:147
-
---->
-
-push_priority_class(pc);                                                            // fair_queue.cc:151
-pc->_queue.push_back(priority_class::request{std::move(func), std::move(desc)});    // fair_queue.cc:153
-
-
-########################################################################################################################
-
-
-// io_queue_submission_pollfn::poll             将异步 io 保存到 _pending_io 中
-
-h = pop_priority_class();                                   // fair_queue.cc:168
-auto req = std::move(h->_queue.front());                    // fair_queue.cc:171
-
---->
-
-req.func()                                                  // fair_queue.cc:199. 这里的 func 实际上就是 pc->_queue.push_back 时的 func
-
---->
-
-reactor::submit_io(kernel_completion* desc, io_request req)         // reactor.cc:1507
-
-
-########################################################################################################################
-
-
-// kernel_submit_work_pollfn::poll           将异步io递交给内核
-
-// reap_kernel_completions_pollfn::poll      检查内核是否完成了异步io, 并执行 promise.set_value, 然后 future 变成就绪态, future.then 调用中的任务可以执行
-
-
-########################################################################################################################
-
 ```
 
-## seastar Ubuntu20.04 源码编译
+文件操作异步  io
+
+```cpp
+// 用户调用
+
+--->
+
+future<size_t> file::dma_read(uint64_t pos, std::vector<iovec> iov, const io_priority_class& pc)		// file.hh:297
+
+--->
+
+future<size_t>
+posix_file_impl::read_dma(uint64_t pos, std::vector<iovec> iov, const io_priority_class& io_priority_class)		// file.cc:340
+    
+--->
+
+future<size_t>
+reactor::submit_io_read(io_queue* ioq, const io_priority_class& pc, size_t len, io_request req)		// reactor.cc:1536
+
+--->
+    
+future<size_t>
+io_queue::queue_request(const io_priority_class& pc, size_t len, internal::io_request req)			// io_queue.cc:248
+    
+// 至此, 异步任务被保存到了 io_queue 中, 在 io_queue_submission_pollfn 中会将这里的任务保存到 _pending_io 中, 在 kernel_submit_work_pollfn 中会将 _pending_io 中的异步任务递交给内核
+```
+
+## 源码编译
 
 ```sh
 sudo ./install-dependencies.sh
@@ -351,4 +317,3 @@ mkdir _build & cd _build
 cmake ..
 make -j2
 ```
-
