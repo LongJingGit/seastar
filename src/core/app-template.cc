@@ -129,7 +129,6 @@ app_template::run(int ac, char ** av, std::function<future<int> ()>&& func) {
 int
 app_template::run(int ac, char ** av, std::function<future<> ()>&& func) {
     return run(ac, av, [func = std::move(func)] {
-        std::cout << __FILE__ << ":" << __LINE__<< std::endl;
         return func().then([] () {
             return 0;
         });
@@ -216,6 +215,8 @@ app_template::run_deprecated(int ac, char ** av, std::function<void ()>&& func)
      *   3.2 创建新的 promise 和新的 future, then(func1) 接口返回后，会用新创建的 future 调用下一个 then(func2)
      *   3.3 当在 engine().run() 中执行 _start_promise 的 set_value 时, task 会被添加到 reactor 的任务队列并执行；在执行具体的 task 时，
      * 会在 satisfy_with_result_of() 中执行 (3.2) 新创建的 promise 的 set_value. (然后会将新创建的 promise 上绑定的 task 添加到 reactor 的任务队列中)
+     *
+     * then() 就是将异步任务 func1 绑定到了调用它的 future 上(即 when_started 返回的 future)，当该 future 就绪时，异步任务 func1 就会运行
      *
      * 4. then(func2)
      *   4.1 调用该 then 接口的是 (3.2) 创建的新的 future, 该 then 调用仍然是先将 func2 封装到 continuation 中，然后将其绑定到新的 promise 的 task 上

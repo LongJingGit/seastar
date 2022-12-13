@@ -233,7 +233,7 @@ reactor::do_accept(pollable_fd_state& listenfd)
      *
      * readable_or_writeable: 将异步任务添加到 iocbs 中，由 kernel_submit_work_pollfn::poll 将异步任务递交给内核, reap_kernel_completions_pollfn::poll 中会检查内核是否完成了异步任务.
      *
-     * readable_or_writeable() 返回的是一个非就绪态的 future, 如何内核完成了异步io, 则会执行 promise.set_value(),
+     * readable_or_writeable() 返回的是一个非就绪态的 future, 如果内核完成了异步io, 则会执行 promise.set_value(),
      * 然后 then 中的任务就会被添加到 reactor 的任务队列继而被执行
      */
     return readable_or_writeable(listenfd).then([this, &listenfd] () mutable {
