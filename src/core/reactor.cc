@@ -3554,7 +3554,7 @@ struct reactor_deleter {
     }
 };
 
-thread_local std::unique_ptr<reactor, reactor_deleter> reactor_holder;
+thread_local std::unique_ptr<reactor, reactor_deleter> reactor_holder;      // 主要用来管理 reactor 的生命周期
 
 std::vector<posix_thread> smp::_threads;
 std::vector<std::function<void ()>> smp::_thread_loops;
@@ -3655,7 +3655,7 @@ void smp::allocate_reactor(unsigned id, reactor_backend_selector rbs, reactor_co
     local_engine = reinterpret_cast<reactor*>(buf);
     *internal::this_shard_id_ptr() = id;            // 保存当前线程所属的 cpu core id, 该变量是 thread_local
     new (buf) reactor(id, std::move(rbs), cfg);
-    reactor_holder.reset(local_engine);
+    reactor_holder.reset(local_engine);     // 把 engine 的生命周期交给 reactor_holder 来管理
 }
 
 void smp::cleanup()
