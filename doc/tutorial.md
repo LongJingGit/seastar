@@ -88,7 +88,7 @@ Seastar is an event-driven framework allowing you to write non-blocking, asynchr
 > Seastar 是一个事件驱动的框架，允许你以一种相对简单的方式(一旦理解)编写非阻塞的异步代码。它的 api 基于 future。Seastar 利用以下概念实现极限性能:
 >
 > * **协作时微任务调度器**: 每个核心运行一个协作时任务调度器，而不是运行线程。每个任务通常都是非常轻量级的：只在处理最后一个 I/O 操作的结果和提交一个新操作的时候运行。
-> * **Share-nothing SMP 体系结构**: 在 SMP 系统中，每个核心独立于其他核心运行。内存、数据结构和 CPU 时间不共享；相反，内核间通信使用显式的消息传递。Seastar 核心通常被称为分片。TODO: 更多信息请点击这里https://github.com/scylladb/seastar/wiki/SMP
+> * **Share-nothing SMP 体系结构**: 在 SMP 系统中，每个核心独立于其他核心运行。内存、数据结构和 CPU 时间不共享；相反，内核间通信使用显式的消息传递。Seastar 核心通常被称为分片。TODO: 更多信息请点击这里 https://github.com/scylladb/seastar/wiki/SMP
 > * **基于 future 的 api**: future 允许你提交 I/O 操作，并在 I/O 操作完成时链接要执行的任务。并行运行多个 I/O 操作很容易：例如，为了响应来自 TCP 连接的请求，你可以发出多个磁盘 I/O 请求，向同一系统上的其他内核发送消息，或向集群中的其他节点发送请求，等待部分或全部结果完成，聚合结果，然后发送响应。
 > * **Share-nothing TCP 栈**: 虽然 Seastar 可以使用主机操作系统的 TCP 栈，但它也提供了自己的高性能 TCP/IP 协议栈，构建在任务调度器和 share-nothing 架构之上。Seastar 的高性能 TCP/IP 协议栈实现了双向的零拷贝：你可以直接在 TCP 协议栈的缓冲区处理数据，并将你自己的数据结构的内容作为消息的一部分发送，而无需引起拷贝。阅读更多...
 > * **基于DMA的存储 api **: 与网络堆栈一样，Seastar 提供零拷贝存储 API，允许你将数据直接通过 DMA 传输到存储设备。
@@ -2694,3 +2694,98 @@ TODO: Say that not yet available. Give example of potential problem - e.g., shar
 TODO: Talk about how to dynamically change the number of shares, and why.
 ## Multi-tenancy
 TODO
+
+# SMP
+
+## SMP Overview
+
+The standard approach to parallelism is to use threads. This model however has many performance drawbacks, so seastar uses a different model, which will be explained below.
+
+> 并行性的标准方法是使用线程。然而这个模型有许多性能缺陷，所以 seastar 使用了一个不同的模型，下面将对此进行解释。
+
+## Background
+
+Threads, as well as processes, are an abstraction provided by operating system. Instead of having one or a small fixed number of processors, the operating system allows the user to create as many virtual processors as they like, and multiplexes those virtual processors on top of the physical processors. These virtual processors are called threads (if they share memory with each other) or processes (if they do not).
+
+> 线程和进程一样，都是操作系统提供的抽象概念。操作系统允许用户创建任意多的虚拟处理器，而不是只有一个或少量固定数量的处理器，并将这些虚拟处理器多路复用到物理处理器之上。这些虚拟处理器被称为线程(如果它们彼此共享内存)或进程(如果它们不共享内存)。
+
+The simplest approach to threading is *thread-per-connection*. For every connection that needs to be served, a thread is created, running a read-process-respond loop in that thread. This approach has a number of issues, limiting it to the simplest applications:
+
+- With a large number of connections, many threads are created. Threads are heavyweight objects so allocating many of them consumes resources (mostly, memory).
+- If many connections are active at the same time, many threads will run concurrently. The operating system will be forced to switch between the threads quickly; as this is an expensive operation, performance will drop.
+- It is hard to guarantee timely processing of an event. If the system has too many threads, they may all be busy, and the system may not schedule the thread serving our event in time. If there are too few threads, they may all be blocked on I/O, so the system may not be able to serve our request even though processor power is available. Getting just the right number of threads is a hard problem.
+
+> 最简单的线程化方法是给每个连接分配一个线程。对于需要服务的每个连接，都会创建一个线程，在该线程中运行一个 read-process-response 循环。这种方法有许多问题，限制它适用于最简单的应用程序:
+>
+> * 有了大量的连接，就会创建许多线程。线程是重量级对象，因此分配许多线程会消耗资源(主要是内存)。
+> * 如果有多个连接同时处于活动状态，则会有多个线程并发运行。操作系统将被迫在线程之间快速切换；由于这是一个昂贵的操作，性能将下降。
+> * 很难保证及时处理事件。如果系统有太多线程，它们可能都很忙，系统可能不会及时安排线程为我们的事件服务。如果线程太少，它们可能都在 I/O 上被阻塞，因此即使处理器有可用的能力，系统也可能无法满足我们的请求。获得适当数量的线程是一个难题。
+
+As a result, most threaded applications now use *thread pools*. Here, a large number of connections are multiplexed on top of a smaller number of threads (which are themselves multiplexed on top of a number of processors). A read thread will wait for a connection to become active, assign it to an idle thread from the thread pool, which will then read a request, process it, and respond.
+
+> 因此，大多数线程应用程序现在都使用*线程池*。在这里，大量的连接在数量较少的线程上进行多路复用(线程本身在一些处理器上进行多路复用)。读线程将等待一个连接变得活跃，将其分配给线程池中的空闲线程，然后该线程将读取请求、处理它并响应。
+
+These threaded designs, however, still have performance issues:
+
+- Data that is shared among connections needs to be locked. Locks, in the worst case, cause excessive context switches and stalls. In the best case, they are expensive operations, and do not scale well on large machines with a dozen or more cores.
+- Shared writable data will be accessed from threads on multiple cores. This requires the processor to move data from one processor's cache to the other, a slow operation.
+- Data allocated on one processor may be accessed on another, or freed on another. With today's [NUMA](http://en.wikipedia.org/wiki/Non-uniform_memory_access) architectures, this imposes a severe penalty on memory access time, and slows down the memory allocator.
+
+> 然而，这些线程设计仍然存在性能问题:
+>
+> * 在连接之间共享的数据需要被锁定。在最坏的情况下，锁会导致过多的上下文切换和失速。在最好的情况下，它们是昂贵的操作，并且在拥有十几个或更多核的大型机器上不能很好地扩展。
+> * 共享可写数据将从多个核上的线程访问。这需要处理器将数据从一个处理器的缓存移动到另一个处理器，这是一个缓慢的操作。
+> * 在一个处理器上分配的数据可以在另一个处理器上访问，也可以在另一个处理器上释放。对于今天的[NUMA](http://en.wikipedia.org/wiki/Non-uniform_memory_access)体系结构，这对内存访问时间造成了严重的影响，并降低了内存分配器的速度。
+
+## The seastar approach
+
+Seastar uses *sharding*, or *partitioning*, to manage multiple cores. Instead of each core sharing responsibility for all connections and all data with all other cores, each core is assigned a subset of the connections and data on the machine. If a computation on a core needs access to data residing on another core, it must explicitly send a message to the remote core, asking it to read or write the data, and waits for a result.
+
+> Seastar 使用*分片*或*分区*来管理多个内核。每个核心不是与所有其他核心共享所有连接和所有数据的责任，而是分配给每个核心机器上的一个连接和数据子集。如果一个核上的计算需要访问驻留在另一个核上的数据，它必须显式地向远程核发送消息，要求它读取或写入数据，并等待结果。
+
+### Partitioning network connections
+
+To partition connections, seastar automatically divides connections among the cores. It utilizes the ability of modern Network Interface Cards (NICs) to provide a packet queue for each core and to automatically divert a subset of packets to those queues. As a result each seastar core receives a share of all connections, and all packets belonging to those connections are processed by that core.
+
+> 为了划分连接，seastar 会自动将连接划分到各个核心。它利用现代网络接口卡(nic)的能力为每个核心提供一个包队列，并自动将包的子集转移到这些队列中。因此，每个 seastar 核心接收所有连接的共享，属于这些连接的所有数据包都由该核心处理。
+
+### Partitioning data
+
+Seastar cannot partition data automatically. The user must choose a partitioning method and divert processing to the correct core. Some partitioning strategies include:
+
+- **Hashed key**: a key-value store, for example, may use the low-order bits of the key to select a core. This is suitable when you have a large number of objects that are usually accessed using a primary key.
+- **Replication**:: data is replicated across all cores. Reads are served from the local core, while modifications are broadcast to all cores. This strategy is useful for frequently read data, rarely written data of small to moderate total capacity.
+
+> Seastar 无法自动分区数据。用户必须选择一种分区方法并将处理转移到正确的核心。一些分区策略包括:
+>
+> * **Hashed key**: 例如，键值存储可以使用键的低阶位来选择核心。当您有大量通常使用主键访问的对象时，这是合适的。
+> * **Replication**: 数据在所有核间复制。读取来自本地核心，而修改则广播到所有核心。该策略适用于总容量较小或中等的频繁读取数据、很少写入数据。
+
+One class of applications is particularly suited for partitioning -- the class of scale-out servers. These are already partitioned across nodes, so partitioning among cores merely extends the model with node-internal shards.
+
+> 有一类应用程序特别适合分区：向外扩展服务器。它们已经跨节点进行了分区，因此在核心之间进行分区只是使用节点内部碎片扩展了模型。
+
+### Advantages of the seastar model
+
+There are many benefits to sharded data and networking:
+
+- **Locality**: a core always accesses data that was allocated and manipulated on the same core. This is beneficial for memory allocators, CPU caches, and for NUMA architectures.
+- **Locking**: the need for locking is much reduced -- often there is no need for locking at all, since all access to a data item is implicitly serialized. When locking is needed (for example, when I/O is needed while processing data), it is accomplished using normal processor instructions rather than serialized atomic read-modify-write instructions.
+
+> 分片数据和网络有很多好处:
+>
+> **Locality**: 一个核始终访问在同一个核上分配和操作的数据。这有利于内存分配器、CPU缓存和NUMA架构。
+>
+> **Locking**: 对锁的需求大大减少 -- 通常根本不需要锁，因为对数据项的所有访问都是隐式序列化的。当需要锁时(例如，在处理数据时需要I/O)，可以使用普通的处理器指令而不是序列化的 原子读-修改-写指令 来完成。
+
+### Disadvantages of the seastar model
+
+Unfortunately, sharding is not without disadvantages:
+
+- Not all applications are amenable to sharding; those applications cannot benefit at all.
+- Imbalance among the cores due to uneven partitioning can result in some cores being overloaded while others are relatively idle, wasting resources
+
+> 不幸的是，分片也不是没有缺点:
+>
+> * 并非所有应用程序都支持分片；这些应用程序根本无法从中受益。
+> * 由于不均匀的分区导致内核之间的不平衡，可能导致一些内核过载，而另一些内核相对空闲，从而浪费资源。
