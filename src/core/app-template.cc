@@ -112,6 +112,11 @@ app_template::configuration() {
 
 int
 app_template::run(int ac, char ** av, std::function<future<int> ()>&& func) {
+    // C++11 的 lambda 无法捕获右值引用，所以可以使用 std::bind 模拟 C++14 的 init-capture
+    // return run_deprecated(ac, av, std::bind([](std::function<future<int> ()>& func) mutable {
+    //     // ...
+    // }, std::move(func)));
+
     return run_deprecated(ac, av, [func = std::move(func)] () mutable {
         auto func_done = make_lw_shared<promise<>>();
         engine().at_exit([func_done] { return func_done->get_future(); });

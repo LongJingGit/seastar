@@ -28,11 +28,15 @@ namespace seastar {
 
 // An unbounded FIFO queue of objects of type T.
 //
+// 无边界 FIFO 队列
+//
 // It provides operations to push items in one end of the queue, and pop them
 // from the other end of the queue - both operations are guaranteed O(1)
 // (not just amortized O(1)). The size() operation is also O(1).
 // chunked_fifo also guarantees that the largest contiguous memory allocation
 // it does is O(1). The total memory used is, of course, O(N).
+//
+// 入队出队的操作都是O(1), size() 的操作也是O(1).
 //
 // How does chunked_fifo differ from std::list<>, circular_buffer<> and
 // std::deque()?

@@ -3954,7 +3954,7 @@ void smp::configure(boost::program_options::variables_map configuration, reactor
 
     smp::count = 1;
     smp::_tmain = std::this_thread::get_id();
-    auto nr_cpus = resource::nr_processing_units();
+    auto nr_cpus = resource::nr_processing_units(); // 获取可用 CPU 数量
     resource::cpuset cpu_set;
     auto cgroup_cpu_set = cgroup::cpu_set();
 
@@ -4048,6 +4048,12 @@ void smp::configure(boost::program_options::variables_map configuration, reactor
 
     if (mlock)
     {
+        // mlockall: 将调用进程的全部地址空间加锁，防止出现内存交换
+        // MCL_CURRENT: 表示对所有已经映射到进程地址空间的内存页上锁
+        // MCL_FUTURE: 表示对将来映射到进程地址空间的内存页上锁
+        // 如果进程执行了 execve 类函数，所有的锁都会被删除
+        // 内存锁不会被子进程继承
+        // 内存锁不会叠加，即时多次调用 mlockall, 只需要调用一次 munlock 就会解锁
         auto r = mlockall(MCL_CURRENT | MCL_FUTURE);
         if (r)
         {
@@ -4086,7 +4092,7 @@ void smp::configure(boost::program_options::variables_map configuration, reactor
         smp::pin(allocations[0].cpu_id);        // 当前主线程绑定到 cpu core 0
     }
 
-    memory::configure(allocations[0].mem, mbind, hugepages_path);
+    memory::configure(allocations[0].mem, mbind, hugepages_path);       // 给线程分配虚拟内存空间
 
     if (configuration.count("abort-on-seastar-bad-alloc"))
     {
